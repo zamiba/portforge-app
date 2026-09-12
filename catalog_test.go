@@ -1,10 +1,8 @@
 package main
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
-	"regexp"
 	"testing"
 
 	"portforge/metadata"
@@ -129,37 +127,15 @@ func TestCatalogCoversHostPlatforms(t *testing.T) {
 // Render96 shipped "VERSION=$romVersion" with only textureMod declared. The
 // build ran for six steps, then make passed the literal string to
 // extract_assets.py, which answered with its usage text.
+// Every variable a catalog spec interpolates must resolve, and every reference
+// must be braced. This runs the engine's own checks rather than a parallel
+// implementation: a hand-rolled copy drifts from the real one silently, and the
+// drift shows up as a spec that passes here and fails on a user's machine.
 func TestCatalogSpecsDeclareEveryVariableTheyUse(t *testing.T) {
 	const catalog = "mediaitems"
 	dirs, err := os.ReadDir(filepath.Join(catalog, metadata.PortItemType))
 	if err != nil {
 		t.Skip("mediaitems submodule not checked out")
-	}
-
-	// Injected by the engine for every run, so a spec may use them without
-	// declaring them.
-	reserved := map[string]bool{"platform": true, "version": true}
-	ref := regexp.MustCompile(`\$\{(\w+)\}|\$(\w+)`)
-
-	// The spec file is walked as plain JSON rather than through the Step struct:
-	// a host-registered step type carries its own fields, and interpolation
-	// applies to all of them.
-	var refsIn func(v any, out map[string]bool)
-	refsIn = func(v any, out map[string]bool) {
-		switch t := v.(type) {
-		case string:
-			for _, m := range ref.FindAllStringSubmatch(t, -1) {
-				out[m[1]+m[2]] = true
-			}
-		case []any:
-			for _, e := range t {
-				refsIn(e, out)
-			}
-		case map[string]any:
-			for _, e := range t {
-				refsIn(e, out)
-			}
-		}
 	}
 
 	for _, d := range dirs {
@@ -174,47 +150,17 @@ func TestCatalogSpecsDeclareEveryVariableTheyUse(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-
-			var doc any
-			if err := json.Unmarshal(raw, &doc); err != nil {
+			file, err := engine.ParseSpecFile(raw)
+			if err != nil {
 				t.Fatalf("parse .forge.json: %v", err)
 			}
-
-			// Both file forms: a bare array of builds, or an object whose args
-			// are the default for every build that does not override them.
-			builds, _ := doc.([]any)
-			declared := map[string]bool{}
-			if obj, ok := doc.(map[string]any); ok {
-				builds, _ = obj["builds"].([]any)
-				if args, ok := obj["args"].(map[string]any); ok {
-					for name := range args {
-						declared[name] = true
-					}
+			for i := range file.Specs {
+				spec := &file.Specs[i]
+				if missing := engine.UndeclaredArgs(spec); len(missing) > 0 {
+					t.Errorf("build %d uses %s, which nothing declares", i, joinVarNames(missing))
 				}
-			}
-
-			for i, b := range builds {
-				build, ok := b.(map[string]any)
-				if !ok {
-					continue
-				}
-				// A build's own args replace the header's rather than adding to
-				// them, which is how the engine resolves them.
-				scope := declared
-				if args, ok := build["args"].(map[string]any); ok {
-					scope = map[string]bool{}
-					for name := range args {
-						scope[name] = true
-					}
-				}
-
-				used := map[string]bool{}
-				refsIn(build["steps"], used)
-				refsIn(build["uninstallSteps"], used)
-				for name := range used {
-					if !scope[name] && !reserved[name] {
-						t.Errorf("build %d uses $%s, which no args entry declares", i, name)
-					}
+				if stale := engine.UnbracedRefs(spec); len(stale) > 0 {
+					t.Errorf("build %d writes %s without braces, so it is not substituted", i, joinArgNames(stale))
 				}
 			}
 		})

@@ -93,6 +93,32 @@ The declared executables, the spec's `version`, and a timestamp are written to `
 
 On failure PortForge preserves the folder for debugging and offers a **Delete build folder** button, which removes the spec's `buildPaths` if it declares any and otherwise falls back to `.build/` and `build/`.
 
+## User data
+
+A port that writes save games or a configuration file inside its own `install/` folder
+would lose them to the usual `deletePath install` teardown. Forge's file-level
+`userDataPaths` names what must survive, and PortForge honours it in three places:
+
+- **Uninstalling.** Preserved paths stay; everything else in `install/` goes. This holds
+  even for a spec that declares no `uninstallSteps` at all — PortForge supplies the
+  default teardown as a step so the same rule applies to it.
+- **Reinstalling or updating.** A build runs over whatever the previous one left behind,
+  so declared user data is moved out of the tree for the duration and moved back
+  afterwards. **The user's copy wins** over a default the build ships at the same path:
+  losing an edited config to an update is worse than carrying an outdated one forward.
+- **A failed build.** Restoration happens on the way out either way, so a build that dies
+  halfway does not take the player's saves with it.
+
+Paths interpolate `$name` like any other, `$platform` and `$version` included, and are
+reported by `forge check` if they reference something the spec never declares.
+
+This covers ports that keep user data beside their own files. A port that accepts a flag
+pointing its save directory elsewhere is the better arrangement — it is what per-profile
+support will need — and `userDataPaths` is what makes the ports that cannot do that safe
+in the meantime.
+
+---
+
 ---
 
 ## Authoring specs with the CLI

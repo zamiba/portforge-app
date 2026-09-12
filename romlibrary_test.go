@@ -140,18 +140,18 @@ func TestInstallRejectsUndeclaredSpecVariables(t *testing.T) {
 	spec := &engine.Spec{
 		Args: map[string]engine.ArgSpec{"textureMod": {Type: "string", Label: "Texture mod"}},
 		Steps: []engine.Step{
-			{Step: "make", Args: []string{"VERSION=$romVersion", "MOD=${textureMod}"}},
+			{Step: "make", Args: []string{"VERSION=${args.romVersion}", "MOD=${args.textureMod}"}},
 		},
 	}
 
 	missing := engine.UndeclaredArgs(spec)
-	if len(missing) != 1 || missing[0] != "romVersion" {
-		t.Fatalf("UndeclaredArgs = %v, want [romVersion]", missing)
+	if len(missing) != 1 || missing[0] != "args.romVersion" {
+		t.Fatalf("UndeclaredArgs = %v, want [args.romVersion]", missing)
 	}
 
-	msg := joinArgNames(missing)
-	if msg != "$romVersion" {
-		t.Errorf("joinArgNames = %q, want %q", msg, "$romVersion")
+	msg := joinVarNames(missing)
+	if msg != "${args.romVersion}" {
+		t.Errorf("joinVarNames = %q, want %q", msg, "${args.romVersion}")
 	}
 }
 

@@ -16,14 +16,15 @@ import (
 // PortForge's ROM library as a provider and forwarding progress to the frontend.
 // overrides carries the per-call engine options that differ between installing
 // and uninstalling; everything else is the same for both.
+// runSpec adds the host half of Options to a spec-derived set from
+// Spec.BuildOptions or Spec.TeardownOptions, and runs it. The caller owns the
+// choice between those two, since only it knows whether an item is going in or
+// coming out.
 func (a *App) runSpec(
 	ctx context.Context,
-	spec *engine.Spec,
-	steps []engine.Step,
-	args map[string]string,
+	opts engine.Options,
 	version *models.VideoGameVersion,
 	versionDir string,
-	overrides engine.Options,
 ) ([]models.ExecutableEntry, error) {
 	if err := os.MkdirAll(versionDir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create version data directory: %w", err)
@@ -40,10 +41,6 @@ func (a *App) runSpec(
 		return nil, err
 	}
 
-	opts := overrides
-	opts.Steps = steps
-	opts.Dependencies = spec.Dependencies
-	opts.Args = args
 	opts.RootDir = versionDir
 	opts.Providers = map[string]engine.Provider{"rom": provider}
 	opts.Events = a.forwardEngineEvent
@@ -178,11 +175,26 @@ func (a *App) romProvider(version *models.VideoGameVersion) (engine.Provider, er
 
 // joinArgNames renders undeclared variable names the way they appear in the
 // spec, so the message can be searched for in the file it is about.
+// joinVarNames renders names the way a spec must now write them.
+func joinVarNames(names []string) string {
+	braced := make([]string, len(names))
+	for i, n := range names {
+		braced[i] = "${" + n + "}"
+	}
+	return joinList(braced)
+}
+
+// joinArgNames renders names the way an unbraced reference appears in the file,
+// so the message quotes back what the author actually typed.
 func joinArgNames(names []string) string {
 	quoted := make([]string, len(names))
 	for i, n := range names {
 		quoted[i] = "$" + n
 	}
+	return joinList(quoted)
+}
+
+func joinList(quoted []string) string {
 	if len(quoted) == 1 {
 		return quoted[0]
 	}

@@ -26,6 +26,71 @@ I freelance full time, so every bit of support is time that I can spend on this 
 
 ---
 
+## Get started
+
+### Download a build
+
+Builds for each release are on the [releases page](https://github.com/zamiba/portforge-app/releases).
+
+| Platform | File |
+| -------- | ---- |
+| Windows 10+ | `portforge.exe` |
+| macOS 12+ | `portforge-macos.zip` |
+| Linux, webkit2gtk **4.0** | `portforge-linux-amd64` |
+| Linux, webkit2gtk **4.1** | `portforge-linux-amd64-webkit4_1` |
+
+**Which Linux build?** PortForge draws its interface with your system's WebKitGTK, and distributions ship one of two incompatible series of it. To see which you have:
+
+```bash
+ldconfig -p | grep libwebkit2gtk
+```
+
+`libwebkit2gtk-4.0.so.37` means the plain build, `libwebkit2gtk-4.1.so.0` the `-webkit4_1` one. Debian and Ubuntu are usually on 4.0; Arch, Fedora 37+ and most rolling distributions are on 4.1. If neither is listed, install it first — the package is `webkit2gtk-4.1` on Arch, `webkit2gtk4.1` on Fedora, and `libwebkit2gtk-4.1-0` on Debian and Ubuntu.
+
+The Linux downloads are plain binaries, so mark one executable and run it:
+
+```bash
+chmod +x portforge-linux-amd64
+./portforge-linux-amd64
+```
+
+Builds are unsigned. **macOS** will refuse to open the app the first time: right-click it and choose **Open**, or run `xattr -d com.apple.quarantine portforge.app` first. **Windows** shows a SmartScreen warning — choose **More info → Run anyway**.
+
+### Or build from source
+
+You need [Go 1.25+](https://go.dev), [Node.js 18+](https://nodejs.org), and the [Wails CLI v2](https://wails.io/docs/gettingstarted/installation), plus the GTK and WebKitGTK development headers for your distribution.
+
+```bash
+go install github.com/wailsapp/wails/v2/cmd/wails@latest
+git clone --recurse-submodules https://github.com/zamiba/portforge-app
+cd portforge-app
+wails build
+```
+
+The binary is written to `build/bin/`. On a system with webkit2gtk 4.1, build with `wails build -tags webkit2_41` instead.
+
+The catalog is a submodule, so `--recurse-submodules` matters — without it the app starts with an empty library.
+
+### Development
+
+```bash
+wails dev
+```
+
+Starts a Vite dev server with hot reload for the frontend. The app is also accessible in a browser at `http://localhost:34115`.
+
+In dev mode the app reads the MediaItems catalog from the `mediaitems/` folder at the project root instead of the OS config directory.
+
+### If the window renders slowly
+
+WebKitGTK is sluggish on some Linux systems in a way PortForge cannot do anything about. As a workaround, `portforge -server` serves the interface over HTTP and prints a URL to open in a normal browser instead of opening a window; `-addr` chooses the address it listens on. Picking folders still needs the desktop window, so use it after first-run setup.
+
+### Missing library errors
+
+PortForge does not pin any version of libjxl or any other image codec — those come from your system's WebKitGTK. An error like `libjxl.so.0.11: cannot open shared object file` means your WebKitGTK and libjxl packages are out of step with one another, which a full system update normally resolves.
+
+---
+
 ## On MediaItems
 
 `MediaItem` is a filesystem-native open standard for cataloguing, archiving, and interacting with any form of media of my own invention. Documentation covering the standard will be released "soon™".
@@ -57,42 +122,6 @@ I freelance full time, so every bit of support is time that I can spend on this 
 - **Play time tracking** — session length is recorded and added to a time counter
 - **Uninstall** — remove installed files via the UI, with optional custom uninstall steps per game
 - **Cross-platform** — Windows, macOS, and Linux
-
----
-
-## Requirements
-
-### Running PortForge
-
-- Windows 10+, macOS 12+, or a modern Linux desktop
-
-### Building from source
-
-- [Go 1.25+](https://go.dev)
-- [Node.js 18+](https://nodejs.org)
-- [Wails CLI v2](https://wails.io/docs/gettingstarted/installation): `go install github.com/wailsapp/wails/v2/cmd/wails@latest`
-
----
-
-## Getting started
-
-### Development
-
-```bash
-wails dev
-```
-
-Starts a Vite dev server with hot reload for the frontend. The app is also accessible in a browser at `http://localhost:34115`.
-
-In dev mode the app reads the MediaItems catalog from the `mediaitems/` folder at the project root instead of the OS config directory.
-
-### Production build
-
-```bash
-wails build
-```
-
-Produces a self-contained binary in `build/bin/`.
 
 ---
 

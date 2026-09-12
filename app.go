@@ -760,15 +760,25 @@ func (a *App) InstallVersion(itemTitle string, args map[string]string, specVersi
 	// strand the user with something they cannot get rid of.
 	if missing := engine.UndeclaredArgs(spec); len(missing) > 0 {
 		return fmt.Errorf("the install spec for %s uses %s, which it does not declare — this is a problem with the spec, not with your setup",
-			itemTitle, joinArgNames(missing))
+			itemTitle, joinVarNames(missing))
+	}
+	// Unbraced references are not interpolated at all, so a spec carrying one
+	// does not fail — it quietly builds the wrong thing, or skips a step whose
+	// condition can never be true. Refusing is the only way that surfaces.
+	if stale := engine.UnbracedRefs(spec); len(stale) > 0 {
+		return fmt.Errorf("the install spec for %s writes %s without braces, so they are not substituted — this is a problem with the spec, not with your setup",
+			itemTitle, joinArgNames(stale))
 	}
 
-	exes, err := a.runSpec(installCtx, spec, spec.Steps, resolvedArgs, version, versionDir, engine.Options{
-		RequireExecutable: true,
-		Platform:          targetPlatform,
-		Version:           specVersion,
-		VersionOrder:      order,
-	})
+	// Installing over an existing install is how an update happens, and a build
+	// that ships its own copy of a file the user has since edited would write
+	// straight over it. The engine moves the spec's userDataPaths out of the
+	// tree for the duration and back afterwards, on failure too, so nothing is
+	// needed here beyond choosing the install constructor.
+	opts := spec.BuildOptions(targetPlatform, specVersion, resolvedArgs, order)
+	opts.RequireExecutable = true
+
+	exes, err := a.runSpec(installCtx, opts, version, versionDir)
 	if err != nil {
 		return err
 	}
@@ -839,8 +849,17 @@ func (a *App) CleanBuildDir(itemTitle string) error {
 func (a *App) UninstallVersion(itemTitle string) error {
 	versionDir := filepath.Join(a.dataPath, metadata.PortItemType, itemTitle)
 
+	// A spec that exists but will not parse must not fall through to the
+	// no-spec path, which removes install/ wholesale: the file that failed to
+	// load is the one naming the paths that removal has to spare. Refusing
+	// leaves the port installed, which the user can recover from; guessing
+	// deletes their saves, which they cannot.
+	specs, err := metadata.LoadInstallationSpecs(a.metadataPath, itemTitle)
+	if err != nil {
+		return fmt.Errorf("cannot uninstall %s: its install spec could not be read, and removing the folder without it risks deleting your save data — %w", itemTitle, err)
+	}
+
 	var cleanupErr error
-	specs, _ := metadata.LoadInstallationSpecs(a.metadataPath, itemTitle)
 	// Uninstall with the steps of the version that was installed, not whichever
 	// spec happens to match first — they can differ between versions.
 	installed, _ := metadata.ReadInstallState(versionDir)
@@ -855,18 +874,24 @@ func (a *App) UninstallVersion(itemTitle string) error {
 	if spec == nil {
 		spec = a.findMatchingSpec(specs)
 	}
-	if spec != nil && len(spec.UninstallSteps) > 0 {
+	if spec != nil {
+		// A spec that declares no teardown gets the default one written out
+		// rather than performed here, so that it runs through the same path as
+		// a declared sequence — and so that userDataPaths protects user data
+		// either way. Ports with no spec at all have nothing to preserve.
+		steps := spec.UninstallSteps
+		if len(steps) == 0 {
+			steps = []engine.Step{{Step: "deletePath", Path: "install"}}
+		}
 		version, _ := a.loadVersion(itemTitle)
-		// The tools that built this item may no longer be installed, so the
-		// dependency check is skipped — but they stay on the run allowlist.
-		// The uninstall steps get the same $platform/$version the build did, so
-		// a spec that branched on them tears down what it actually created.
-		_, cleanupErr = a.runSpec(a.ctx, spec, spec.UninstallSteps, map[string]string{}, version, versionDir, engine.Options{
-			SkipDependencyCheck: true,
-			Platform:            wantPlatform,
-			Version:             wantVersion,
-			VersionOrder:        engine.VersionOrder(specs),
-		})
+		// TeardownOptions skips the dependency check, since the tools that built
+		// this item may be long gone, and stops the engine setting user data
+		// aside — a removal is protected by deletePath sparing the declared
+		// paths instead. The steps get the same platform and version the build
+		// did, so a spec that branched on them tears down what it created.
+		opts := spec.TeardownOptions(wantPlatform, wantVersion, map[string]string{}, engine.VersionOrder(specs))
+		opts.Steps = steps
+		_, cleanupErr = a.runSpec(a.ctx, opts, version, versionDir)
 	} else {
 		cleanupErr = os.RemoveAll(filepath.Join(versionDir, "install"))
 	}

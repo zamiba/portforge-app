@@ -2,6 +2,55 @@
 
 All notable changes to PortForge are recorded here.
 
+## v0.3.0-alpha — 2026-09-12
+
+### Added
+
+**User data survives uninstalling and updating.** A port that keeps its save games or
+configuration inside its own install folder used to lose them twice over: the teardown
+removed `install/`, and a rebuild wrote over whatever was left. A spec can now declare
+`userDataPaths`, and those paths are kept when uninstalling, when installing over an
+existing install, and when a build fails partway through. Where a build ships its own
+copy of a file you have edited, your copy wins.
+
+Ports that declare nothing behave exactly as before.
+
+**A real install section in the README.** Downloads are now the first thing on the page,
+with a table of the release files, how to tell which of the two Linux builds your
+distribution needs, and what to do about the unsigned-build warnings on macOS and
+Windows. It also documents `-server` for the first time — the workaround for systems
+where the window renders slowly — and what a `libjxl.so.0.11: cannot open shared object
+file` error means, which is a mismatch between your own WebKitGTK and libjxl rather than
+anything PortForge pins.
+
+### Changed
+
+**A port that declares no uninstall steps now gets a teardown that spares user data.**
+Previously such a port had its install folder removed wholesale, with no way to make an
+exception. PortForge now supplies the default teardown as a proper step, so
+`userDataPaths` applies whether or not a port author wrote an uninstall sequence.
+
+**Install spec variables are namespaced and must be braced.** A spec writes
+`${args.region}` for an argument, `${platform}` and `${version}` for the build target,
+and `${platform.slug}` for a variable a platform binds. The unbraced `$name` is no
+longer substituted at all, so PortForge refuses to install a spec that still uses one —
+it would otherwise build the wrong thing in silence, or skip a step whose condition can
+never be true again. Every catalog spec that used a variable has been migrated.
+
+**The build engine is [Forge](https://github.com/zamiba/forge) v0.0.6-alpha.**
+Protecting user data across a rebuild moved into the engine, so it is identical here and
+available to anything else built on it.
+
+### Fixed
+
+**An unreadable install spec no longer takes your save data with it.** Uninstalling
+discarded the error from loading a port's spec and treated a broken file the same as a
+missing one, which meant removing the install folder wholesale — reaching for the
+destructive default in exactly the case where the file naming what to spare was the one
+that failed to load. Uninstalling now stops and says so, which means it can fail where
+it previously appeared to succeed. Leaving a port installed is recoverable; deleting a
+save file is not.
+
 ## v0.2.0-alpha — 2026-09-07
 
 The largest release so far. PortForge narrowed from a do-everything app into one program
