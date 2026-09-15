@@ -142,9 +142,12 @@ type ArgPrompt struct {
 }
 
 // ExecutableEntry describes a launchable executable produced by an install.
+// Args may still carry provider references — ${romPath} — which are resolved
+// at launch, not at install, so the ROM is found wherever it is at the time.
 type ExecutableEntry struct {
-	Path  string `json:"path"`
-	Title string `json:"title"`
+	Path  string   `json:"path"`
+	Title string   `json:"title"`
+	Args  []string `json:"args,omitempty"`
 }
 
 type InstallState struct {

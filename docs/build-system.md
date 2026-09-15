@@ -60,9 +60,23 @@ Combine `src` with an arg to let the user pick the region:
   }
 },
 "steps": [
-  { "step": "copy", "from": "rom", "src": "${region}", "dest": ".build/baserom.z64" }
+  { "step": "copy", "from": "rom", "src": "${args.region}", "dest": ".build/baserom.z64" }
 ]
 ```
+
+A step can also be handed the ROM's path instead of a copy: `${romPath}` is the path of any present dependency and `${romPath.<name>}` that of the requirement called `<name>` — the same lookup a `copy` makes, without the copy. This is for a port whose own installer reads the disc:
+
+```json
+{ "step": "run", "cmd": "install/nectar-launcher", "args": ["--rom", "${romPath}", "--install-dir", "install", "--extract-only"] }
+```
+
+The same reference in a `defineExecutable` step's `args` is not resolved at install time. It is recorded as written and resolved every time the game is launched, against the library as it is then — so the disc is found after a storage unit moves, and a ROM added after installing works without reinstalling. A port that takes its disc on the command line boots straight into the game:
+
+```json
+{ "step": "defineExecutable", "executable": "install/melee", "title": "Play", "args": ["${romPath}"] }
+```
+
+Launching such a port without the ROM present is refused with a message naming what is missing.
 
 A `copy from:"rom"` step fails the install when no matching ROM is in the library.
 
@@ -75,7 +89,7 @@ A spec's `dependencies` array serves two purposes: PortForge verifies each comma
 ```json
 "dependencies": ["make", "gcc", "python3", "unzip"],
 "steps": [
-  { "step": "run", "cmd": "make", "args": ["VERSION=${region}", "-j4"] }
+  { "step": "run", "cmd": "make", "args": ["VERSION=${args.region}", "-j4"] }
 ]
 ```
 
@@ -87,7 +101,7 @@ Uninstall sequences skip the pre-flight check — the tools that built a game ma
 
 ## Install results
 
-A successful install must declare at least one `defineExecutable` step; PortForge fails the install otherwise, since there would be nothing to launch. The first becomes the default Play button and the rest appear in a dropdown. Paths are recorded relative to the item's data folder.
+A successful install must declare at least one `defineExecutable` step; PortForge fails the install otherwise, since there would be nothing to launch. The first becomes the default Play button and the rest appear in a dropdown. Paths are recorded relative to the item's data folder, and `args`, if given, are what the executable is started with.
 
 The declared executables, the spec's `version`, and a timestamp are written to `.state/meta.json`, alongside play-time tracking that accumulates across sessions.
 

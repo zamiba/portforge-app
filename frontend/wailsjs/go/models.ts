@@ -161,6 +161,7 @@ export namespace models {
 	export class ExecutableEntry {
 	    path: string;
 	    title: string;
+	    args?: string[];
 	
 	    static createFrom(source: any = {}) {
 	        return new ExecutableEntry(source);
@@ -170,6 +171,7 @@ export namespace models {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.path = source["path"];
 	        this.title = source["title"];
+	        this.args = source["args"];
 	    }
 	}
 	export class Platform {

@@ -2,15 +2,42 @@
 
 All notable changes to PortForge are recorded here.
 
+## v0.3.2-alpha — Unreleased
+
+### Added
+
+**A port can be launched with arguments, including the path of its ROM.** A spec can give
+`defineExecutable` an `args` list, and a `${romPath}` in it is resolved when the game is
+launched — every time, against the library as it is then — rather than when it was
+installed. So the disc is found after a storage unit moves, and a ROM added after
+installing works without reinstalling. Launching a port whose ROM is missing is refused
+with a message saying so, instead of starting a game that cannot find its data. This is
+for the port that takes its disc on the command line and otherwise shows a chooser on
+every start; the first such port in the catalog is melee-pc.
+
+### Changed
+
+**The build engine is Forge v0.0.8-alpha**, which adds the launch arguments above.
+
+### Fixed
+
+**GameCube disc images were invisible.** The catalog gained `GameCubeDiscImage` items with
+Open Nectar, but PortForge's list of ROM types was never told, so v0.3.1 neither loaded
+them from the catalog nor found them in a storage unit: the ROMs page showed Pikmin's
+requirements with nothing that could satisfy them, and installing Open Nectar stopped with
+"no ROM available" however many discs were present. The test that walks the catalog now
+fails when a ROM type it references is unknown.
+
 ## v0.3.1-alpha — 2026-09-15
 
 ### Added
 
-**Open Nectar, the native Pikmin port, is in the catalog.** It is also the first port
-whose spec runs the port's own installer: Open Nectar extracts the game's assets from
-your disc image, and PortForge now does that at install time, reading the disc where it
-sits in your storage unit, rather than leaving it to a file dialog on first launch.
-Requires either the USA Rev 1 or the European disc, which is the port's rule, not ours.
+**An install can run the port's own installer against the ROM where it lives.** A spec
+may run a file its own steps downloaded, and may hand any step the path of a ROM with
+`${romPath}` instead of copying the ROM into the install. A port that extracts its assets
+from a disc image now does so at install time, reading the disc where it sits in your
+storage unit, rather than leaving it to a file dialog on first launch. The first port in
+the catalog to use this is Open Nectar.
 
 ### Changed
 
@@ -29,10 +56,8 @@ and a reconnecting browser is handed what it missed before live delivery resumes
 desktop build is unaffected. A tab gone for longer than that loses the overflow; a freshly
 loaded page never receives history, since it fetches its state on load.
 
-**The build engine is Forge v0.0.7-alpha.** An install spec may run a file its own steps
-downloaded — a port's installer — and may hand a step the path of a ROM with
-`${romPath}` instead of copying the ROM into the install. A spec that reads a provider
-PortForge does not have is refused before anything is downloaded.
+**The build engine is Forge v0.0.7-alpha**, which adds the two capabilities above. A spec
+that reads a provider PortForge does not have is refused before anything is downloaded.
 
 ## v0.3.0-alpha — 2026-09-12
 

@@ -46,6 +46,16 @@ func TestROMLibraryCoversEveryPortThatNeedsAROM(t *testing.T) {
 			if len(req.Options) == 0 {
 				t.Errorf("%s: requirement %q has no options", p.ItemTitle, req.Name)
 			}
+			// An option is hydrated from the catalog's ROM item of that type. One
+			// with no formats has no checksums, so no dump can ever match it —
+			// which is what happens when a catalog gains a new ROM type that
+			// metadata.RomItemTypes does not know about.
+			for _, opt := range req.Options {
+				if len(opt.Formats) == 0 {
+					t.Errorf("%s: option %q (%s) has no formats — is %q missing from metadata.RomItemTypes, or the item from the catalog?",
+						p.ItemTitle, opt.Title, opt.ItemType, opt.ItemType)
+				}
+			}
 		}
 	}
 }

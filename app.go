@@ -939,12 +939,29 @@ func (a *App) LaunchVersion(itemTitle string, executablePath string) error {
 		return fmt.Errorf("no executable path configured for this version — add \"executablePath\" to the download entry in the .mediaitem.json and reinstall")
 	}
 
-	targetPath := executablePath
-	if targetPath == "" {
-		targetPath = exes[0].Path
+	exe := exes[0]
+	if executablePath != "" {
+		found := false
+		for _, e := range exes {
+			if e.Path == executablePath {
+				exe, found = e, true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("%s has no executable at %q", itemTitle, executablePath)
+		}
 	}
 
-	absPath, err := filepath.Abs(filepath.Join(versionDir, targetPath))
+	absPath, err := filepath.Abs(filepath.Join(versionDir, exe.Path))
+	if err != nil {
+		return err
+	}
+
+	// A launch argument may name a ROM — ${romPath} — which is looked up now,
+	// against the library as it is today, rather than at install time: the
+	// storage unit may have moved, or the ROM arrived after the install.
+	args, err := a.launchArgs(itemTitle, exe)
 	if err != nil {
 		return err
 	}
@@ -953,7 +970,7 @@ func (a *App) LaunchVersion(itemTitle string, executablePath string) error {
 		_ = os.Chmod(absPath, 0755)
 	}
 
-	cmd := newCommand(absPath)
+	cmd := newCommand(absPath, args...)
 	cmd.Dir = filepath.Dir(absPath)
 	if err := cmd.Start(); err != nil {
 		return err
@@ -981,6 +998,31 @@ func (a *App) LaunchVersion(itemTitle string, executablePath string) error {
 	}()
 
 	return nil
+}
+
+// launchArgs resolves an executable's arguments against the ROM library. The
+// provider is built on first use, so an executable whose args carry no
+// reference — nearly all of them — reads neither the catalog nor the library.
+func (a *App) launchArgs(itemTitle string, exe models.ExecutableEntry) ([]string, error) {
+	var rom engine.Provider
+	lazy := engine.ProviderFunc(func(ctx context.Context, req engine.ProviderRequest) (string, error) {
+		if rom == nil {
+			version, err := a.loadVersion(itemTitle)
+			if err != nil {
+				return "", err
+			}
+			if rom, err = a.romProvider(version); err != nil {
+				return "", err
+			}
+		}
+		return rom.Resolve(ctx, req)
+	})
+	forgeExe := engine.Executable{Path: exe.Path, Title: exe.Title, Args: exe.Args}
+	args, err := forgeExe.LaunchArgs(context.Background(), map[string]engine.Provider{"rom": lazy})
+	if err != nil {
+		return nil, fmt.Errorf("%s needs a ROM to launch: %w", itemTitle, err)
+	}
+	return args, nil
 }
 
 // GetInstallSize returns the total bytes occupied by a version's data directory,

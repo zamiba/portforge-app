@@ -79,6 +79,7 @@ function romTypeLabel(type) {
     NESCartRom: 'NES',
     GBCartRom: 'Game Boy',
     GBCCartRom: 'Game Boy Color',
+    GameCubeDiscImage: 'GameCube',
     PS1DiscImage: 'PS1',
     Xbox360DiscImage: 'Xbox 360',
   }

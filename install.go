@@ -54,7 +54,7 @@ func (a *App) runSpec(
 
 	exes := make([]models.ExecutableEntry, 0, len(res.Executables))
 	for _, e := range res.Executables {
-		exes = append(exes, models.ExecutableEntry{Path: e.Path, Title: e.Title})
+		exes = append(exes, models.ExecutableEntry{Path: e.Path, Title: e.Title, Args: e.Args})
 	}
 	return exes, nil
 }

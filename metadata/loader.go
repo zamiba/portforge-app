@@ -173,7 +173,7 @@ const PortItemType = "VideoGameFanPort"
 // optional: "N64Rom" would also describe the console's own firmware, which is a
 // different type. What makes a dump "a game's ROM" is the reference graph — a
 // version's romDependencies pointing at it — not its type.
-var RomItemTypes = []string{"GBCartRom", "GBCCartRom", "N64CartRom", "NESCartRom", "PS1DiscImage", "Xbox360DiscImage"}
+var RomItemTypes = []string{"GBCartRom", "GBCCartRom", "GameCubeDiscImage", "N64CartRom", "NESCartRom", "PS1DiscImage", "Xbox360DiscImage"}
 
 // LoadAllRoms reads all ROM mediaitem directories across all known ROM item types.
 func LoadAllRoms(baseDir string) ([]models.VideoGameRom, error) {
