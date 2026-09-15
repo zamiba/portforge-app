@@ -2,7 +2,7 @@
 
 All notable changes to PortForge are recorded here.
 
-## Unreleased
+## v0.3.1-alpha — 2026-09-15
 
 ### Added
 
