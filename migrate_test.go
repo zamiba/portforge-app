@@ -2,9 +2,9 @@ package main
 
 import (
 	"encoding/json"
+	"github.com/zamiba/go-mediaitems/storageunit"
 	"os"
 	"path/filepath"
-	"portforge/storageunits"
 	"testing"
 )
 
@@ -161,7 +161,7 @@ func TestMigrateLibraryPathRetriesWhenTheFolderIsAbsent(t *testing.T) {
 }
 
 // storageUnitsForTest builds a manager against the redirected config directory.
-func storageUnitsForTest() (*storageunits.Manager, error) { return storageunits.NewManager() }
+func storageUnitsForTest() (*storageunit.Manager, error) { return storageunit.Open() }
 
 // The two migrations are ordered, and the order is load-bearing: the type folders
 // live under the storage root, so the library path has to become a unit before

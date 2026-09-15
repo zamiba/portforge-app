@@ -5,7 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"portforge/storageunits"
+	"github.com/zamiba/go-mediaitems/storageunit"
 )
 
 // This file is a one-time migration of user data, not a compatibility layer.
@@ -102,7 +102,7 @@ type legacySettingsFile struct {
 // it out of the way, so this runs exactly once without needing new state to
 // record that it has. A user who later empties the list keeps it empty, because
 // there is nothing left to migrate.
-func migrateLibraryPath(units *storageunits.Manager, oldSettingsPath string) {
+func migrateLibraryPath(units *storageunit.Manager, oldSettingsPath string) {
 	if units == nil || oldSettingsPath == "" {
 		return
 	}

@@ -108,6 +108,7 @@ PortForge does not pin any version of libjxl or any other image codec — those 
 - Expand documentation to include how to dump ROMs
 - Add support for getting older PC games to run
 - Add support for dumping disc-based games with `redumper` (has been moved to it's own TBA project)
+- Offer to report an install or build failure as a GitHub issue, on approval and with nothing identifying in it
 
 ---
 

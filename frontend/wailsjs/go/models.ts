@@ -720,9 +720,9 @@ export namespace models {
 
 }
 
-export namespace storageunits {
+export namespace storageunit {
 	
-	export class Unit {
+	export class StorageUnit {
 	    id: string;
 	    name: string;
 	    path: string;
@@ -731,7 +731,7 @@ export namespace storageunits {
 	    unreachable: boolean;
 	
 	    static createFrom(source: any = {}) {
-	        return new Unit(source);
+	        return new StorageUnit(source);
 	    }
 	
 	    constructor(source: any = {}) {

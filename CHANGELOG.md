@@ -2,6 +2,38 @@
 
 All notable changes to PortForge are recorded here.
 
+## Unreleased
+
+### Added
+
+**Open Nectar, the native Pikmin port, is in the catalog.** It is also the first port
+whose spec runs the port's own installer: Open Nectar extracts the game's assets from
+your disc image, and PortForge now does that at install time, reading the disc where it
+sits in your storage unit, rather than leaving it to a file dialog on first launch.
+Requires either the USA Rev 1 or the European disc, which is the port's rule, not ours.
+
+### Changed
+
+**Storage units come from the shared `go-mediaitems` module.** PortForge's own copy of
+the storage-unit code is gone, replaced by `github.com/zamiba/go-mediaitems/storageunit`
+v0.1.0 — the same code every program in the suite now uses to read and write
+`storage-units.json`. The file, its location and its format are unchanged, so nothing
+needs migrating. Two things are better for it: a folder reached by two routes (a symlink,
+a second mount) can no longer be added twice, and a file you have edited by hand keeps
+the order you wrote it in.
+
+**Browser mode catches up after a dropped connection.** Under `-server`, a tab that lost
+its connection used to miss every event emitted while it was away — an install's progress
+simply stopped. Events now carry a sequence number, the server keeps the most recent 1,024,
+and a reconnecting browser is handed what it missed before live delivery resumes. The
+desktop build is unaffected. A tab gone for longer than that loses the overflow; a freshly
+loaded page never receives history, since it fetches its state on load.
+
+**The build engine is Forge v0.0.7-alpha.** An install spec may run a file its own steps
+downloaded — a port's installer — and may hand a step the path of a ROM with
+`${romPath}` instead of copying the ROM into the install. A spec that reads a provider
+PortForge does not have is refused before anything is downloaded.
+
 ## v0.3.0-alpha — 2026-09-12
 
 ### Added

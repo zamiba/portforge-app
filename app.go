@@ -13,8 +13,9 @@ import (
 	"path/filepath"
 	"portforge/metadata"
 	"portforge/models"
-	"portforge/storageunits"
 	"portforge/store"
+
+	"github.com/zamiba/go-mediaitems/storageunit"
 	"runtime"
 	"strings"
 	"sync"
@@ -374,7 +375,7 @@ type App struct {
 	dataPath     string // user data: ROM files, install dirs, .state.json (writable)
 	store        *store.Store
 
-	units *storageunits.Manager
+	units *storageunit.Manager
 
 	// events is nil in the desktop build, where emit falls through to the Wails
 	// runtime. Under -server it is set to the SSE hub's broadcast, and it doubles
@@ -476,7 +477,7 @@ func (a *App) startup(ctx context.Context) {
 	// folder one program added silently becomes a destination every other program
 	// will write to — a choice the user never made, surfacing in an app they may
 	// not have opened.
-	if m, err := storageunits.NewManager(); err == nil {
+	if m, err := storageunit.Open(); err == nil {
 		a.units = m
 	}
 	a.migrate(legacySettingsPath())
@@ -768,6 +769,15 @@ func (a *App) InstallVersion(itemTitle string, args map[string]string, specVersi
 	if stale := engine.UnbracedRefs(spec); len(stale) > 0 {
 		return fmt.Errorf("the install spec for %s writes %s without braces, so they are not substituted — this is a problem with the spec, not with your setup",
 			itemTitle, joinArgNames(stale))
+	}
+	// A spec can read a provider by name — ${romPath} — but cannot declare one;
+	// the host registers them, and PortForge registers exactly one. Anything
+	// else would fail at the step that reads it, after the download.
+	for _, name := range engine.ProviderRefs(spec) {
+		if name != "rom" {
+			return fmt.Errorf("the install spec for %s reads ${%sPath}, and PortForge has no %q provider — only ${romPath} is available here",
+				itemTitle, name, name)
+		}
 	}
 
 	// Installing over an existing install is how an update happens, and a build
@@ -1437,8 +1447,8 @@ func copyFile(src, dst string) error {
 // ── StorageUnits ─────────────────────────────────────────────────────────────
 // The shared, ordered list of folders finished output is written to. The file
 // behind these is read and written by every program in the suite, so the
-// behaviour lives in the storageunits package and matches the suite README
-// rather than being reimplemented here.
+// behaviour lives in the shared go-mediaitems module, so every suite program
+// treats the list identically rather than reimplementing it here.
 
 // syncDataPath points this program's storage root at the highest-priority unit.
 //
@@ -1464,7 +1474,7 @@ func (a *App) syncDataPath() {
 }
 
 // GetStorageUnits returns the units in priority order with live space figures.
-func (a *App) GetStorageUnits() ([]storageunits.Unit, error) {
+func (a *App) GetStorageUnits() ([]storageunit.StorageUnit, error) {
 	if a.units == nil {
 		return nil, fmt.Errorf("the shared storage settings could not be opened")
 	}
@@ -1473,7 +1483,7 @@ func (a *App) GetStorageUnits() ([]storageunits.Unit, error) {
 
 // AddStorageUnit prompts for a folder and appends it as the lowest-priority
 // unit. An empty return means the user cancelled, which is not an error.
-func (a *App) AddStorageUnit() (*storageunits.Unit, error) {
+func (a *App) AddStorageUnit() (*storageunit.StorageUnit, error) {
 	if a.units == nil {
 		return nil, fmt.Errorf("the shared storage settings could not be opened")
 	}

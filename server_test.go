@@ -3,8 +3,10 @@ package main
 import (
 	"bufio"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -155,7 +157,7 @@ func TestEventHubStreamsToConnectedClients(t *testing.T) {
 // A full queue must not stall the build that is producing the events.
 func TestBroadcastDoesNotBlockOnAStalledClient(t *testing.T) {
 	hub := newEventHub()
-	hub.add() // never read from
+	hub.subscribe(0) // never read from
 
 	done := make(chan struct{})
 	go func() {
@@ -250,5 +252,172 @@ func TestSPAFallsBackToIndex(t *testing.T) {
 		if got := rec.Body.String(); got != want {
 			t.Errorf("GET %s = %q, want %q", path, got, want)
 		}
+	}
+}
+
+// sseClient gives up on a stream that stops delivering. http.Client.Timeout
+// covers reading the body, which is what makes a missing frame a fast failure
+// rather than a wait for the next keepalive.
+var sseClient = &http.Client{Timeout: 3 * time.Second}
+
+// readFrames collects SSE frames from a stream until n data lines have arrived
+// or the deadline passes. Each frame is returned with the id: that preceded it.
+func readFrames(t *testing.T, body io.Reader, n int) (ids []string, events []sseEvent) {
+	t.Helper()
+	scanner := bufio.NewScanner(body)
+	deadline := time.Now().Add(3 * time.Second)
+	var lastID string
+	for scanner.Scan() && len(events) < n {
+		line := scanner.Text()
+		switch {
+		case strings.HasPrefix(line, "id: "):
+			lastID = strings.TrimPrefix(line, "id: ")
+		case strings.HasPrefix(line, "data: "):
+			var ev sseEvent
+			if err := json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &ev); err != nil {
+				t.Fatalf("event was not JSON: %v (%s)", err, line)
+			}
+			ids = append(ids, lastID)
+			events = append(events, ev)
+		}
+		if time.Now().After(deadline) {
+			break
+		}
+	}
+	if len(events) < n {
+		t.Fatalf("only %d of %d events arrived", len(events), n)
+	}
+	return ids, events
+}
+
+// Every frame carries its sequence number as the SSE id, which is what the
+// browser sends back as Last-Event-ID when it reconnects on its own.
+func TestEventFramesCarryTheSequenceAsTheirID(t *testing.T) {
+	hub := newEventHub()
+	hub.broadcast("a", nil)
+	hub.broadcast("b", nil)
+	hub.broadcast("c", nil)
+
+	srv := httptest.NewServer(hub)
+	defer srv.Close()
+	req, _ := http.NewRequest(http.MethodGet, srv.URL, nil)
+	req.Header.Set("Last-Event-ID", "1")
+	res, err := sseClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+
+	ids, events := readFrames(t, res.Body, 2)
+	for i, ev := range events {
+		if ids[i] != strconv.FormatUint(ev.Seq, 10) {
+			t.Errorf("frame %d: id: line %q does not match seq %d", i, ids[i], ev.Seq)
+		}
+	}
+	if events[0].Seq != 2 || events[1].Seq != 3 {
+		t.Errorf("seqs = %d, %d; want 2, 3", events[0].Seq, events[1].Seq)
+	}
+}
+
+// A reconnecting browser presents the last id it saw and gets everything after
+// it — the events that happened while it was gone — before live delivery starts.
+func TestReconnectReplaysEventsMissedWhileAway(t *testing.T) {
+	hub := newEventHub()
+	for i := 1; i <= 5; i++ {
+		hub.broadcast("install:log", map[string]interface{}{"line": i})
+	}
+
+	srv := httptest.NewServer(hub)
+	defer srv.Close()
+	req, _ := http.NewRequest(http.MethodGet, srv.URL, nil)
+	req.Header.Set("Last-Event-ID", "2")
+	res, err := sseClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+
+	// 3, 4, 5 were missed; then one live event proves the stream continues.
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		hub.broadcast("install:log", map[string]interface{}{"line": 6})
+	}()
+	_, events := readFrames(t, res.Body, 4)
+	var got []uint64
+	for _, ev := range events {
+		got = append(got, ev.Seq)
+	}
+	want := []uint64{3, 4, 5, 6}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("seqs = %v, want %v", got, want)
+		}
+	}
+}
+
+// The query form exists for a caller that kept the cursor itself, since
+// EventSource cannot set headers on a first connection.
+func TestSinceQueryResumesLikeTheHeader(t *testing.T) {
+	hub := newEventHub()
+	hub.broadcast("a", nil)
+	hub.broadcast("b", nil)
+
+	srv := httptest.NewServer(hub)
+	defer srv.Close()
+	res, err := sseClient.Get(srv.URL + "?since=1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	_, events := readFrames(t, res.Body, 1)
+	if events[0].Seq != 2 || events[0].Name != "b" {
+		t.Errorf("got seq %d %q, want 2 \"b\"", events[0].Seq, events[0].Name)
+	}
+}
+
+// A fresh page — no cursor — must not be handed history it never saw. It
+// refetches state on mount; replaying install:log lines into it would double
+// them.
+func TestFreshConnectionGetsNoHistory(t *testing.T) {
+	hub := newEventHub()
+	hub.broadcast("stale", nil)
+
+	ch, missed := hub.subscribe(0)
+	defer hub.remove(ch)
+	if len(missed) != 0 {
+		t.Errorf("a live-only subscription was handed %d old events", len(missed))
+	}
+}
+
+// History is bounded. A client gone longer than replayDepth events gets the
+// newest replayDepth and loses the rest — a real limit the depth is sized for.
+func TestReplayIsBoundedToTheNewestEvents(t *testing.T) {
+	hub := newEventHub()
+	for i := 0; i < replayDepth+10; i++ {
+		hub.broadcast("install:log", nil)
+	}
+
+	ch, missed := hub.subscribe(1)
+	defer hub.remove(ch)
+	if len(missed) != replayDepth {
+		t.Fatalf("replayed %d events, want %d", len(missed), replayDepth)
+	}
+	if first := missed[0].Seq; first != 11 {
+		t.Errorf("oldest replayed seq = %d, want 11 (the 10 oldest should have been dropped)", first)
+	}
+	if last := missed[len(missed)-1].Seq; last != uint64(replayDepth+10) {
+		t.Errorf("newest replayed seq = %d, want %d", last, replayDepth+10)
+	}
+}
+
+// A garbage cursor is treated as no cursor, not as an error and not as zero
+// history from the beginning of time.
+func TestMalformedCursorMeansLiveOnly(t *testing.T) {
+	hub := newEventHub()
+	hub.broadcast("a", nil)
+	req, _ := http.NewRequest(http.MethodGet, "/events", nil)
+	req.Header.Set("Last-Event-ID", "not-a-number")
+	if got := resumeFrom(req); got != 0 {
+		t.Errorf("resumeFrom(garbage) = %d, want 0", got)
 	}
 }
