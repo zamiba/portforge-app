@@ -22,6 +22,17 @@ const romRefresh = ref(0)
 const needsSetup = ref(false)
 const libraryWarning = ref(null)
 
+// A quiet notice for things that happen on their own — the startup catalog
+// refresh — shown briefly and never in the way. The refreshing state stays up
+// until the refresh ends, so the notice cannot be missed between the two.
+const notice = ref(null)
+let noticeTimer = null
+function showNotice(text, ms = 6000) {
+  clearTimeout(noticeTimer)
+  notice.value = text
+  noticeTimer = ms ? setTimeout(() => { notice.value = null }, ms) : null
+}
+
 const pendingDrop = ref(null)  // ROMDropSummary from MatchDroppedROMs
 const dropError = ref(null)
 const dropMatching = ref(false)
@@ -145,6 +156,16 @@ async function onSettingsSaved() {
 }
 
 onMounted(async () => {
+  // Registered before the library loads: the startup refresh runs in the
+  // background from the moment the backend is up, and its "done" must not
+  // fall between our first read of the catalog and our subscribing to it.
+  EventsOn('catalog:refreshing', () => showNotice('Updating the port catalog…', 0))
+  EventsOn('catalog:refreshed', async () => {
+    await loadLibrary()
+    showNotice('Port catalog updated')
+  })
+  EventsOn('catalog:refresh-failed', () => { notice.value = null })
+
   const settings = await GetSettings()
   if (!settings.dataPath) {
     needsSetup.value = true
@@ -205,6 +226,9 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  EventsOff('catalog:refreshing')
+  EventsOff('catalog:refreshed')
+  EventsOff('catalog:refresh-failed')
   EventsOff('install:started')
   EventsOff('install:progress')
   EventsOff('install:step')
@@ -281,6 +305,10 @@ function dismissDrop() {
     <div class="content-area">
       <div v-if="isDragging" class="drop-overlay">
         <div class="drop-overlay-inner">Drop ROM file here</div>
+      </div>
+
+      <div v-if="notice" class="notice-banner">
+        <span>{{ notice }}</span>
       </div>
 
       <div v-if="libraryWarning" class="library-warning-banner">
@@ -431,6 +459,17 @@ main {
 }
 
 /* ── Banners ── */
+.notice-banner {
+  display: flex;
+  align-items: center;
+  padding: 8px 24px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  color: var(--dim);
+  font-size: 12.5px;
+  flex-shrink: 0;
+}
+
 .library-warning-banner {
   display: flex;
   align-items: center;

@@ -2,7 +2,7 @@
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { EventsOn, EventsOff } from '../../wailsjs/runtime/runtime'
 import {
-  GetSettings, ValidateMediaItemsPath,
+  GetSettings, ValidateMediaItemsPath, SetAutoRefreshCatalog,
   GetCatalogInfo, CheckMediaItemsUpdate, SyncMediaItems,
   GetLibraryStorage, RefreshLibraryIndex,
   GetStorageUnits, AddStorageUnit, RemoveStorageUnit, ReorderStorageUnits, OpenStorageUnit,
@@ -107,8 +107,30 @@ const downloading = ref(false)
 const downloadPhase = ref('')
 const downloadPercent = ref(0)
 
+// ── Auto-refresh ────────────────────────────────────────────────────────────
+// Whether startup checks GitHub for a newer catalog. Written the moment it is
+// toggled; there is no separate save on the settings page.
+const autoRefresh = ref(true)
+
+async function loadAutoRefresh() {
+  try {
+    autoRefresh.value = (await GetSettings()).autoRefreshCatalog
+  } catch { /* keep the default */ }
+}
+
+async function setAutoRefresh(on) {
+  const before = autoRefresh.value
+  autoRefresh.value = on
+  try {
+    await SetAutoRefreshCatalog(on)
+  } catch (e) {
+    autoRefresh.value = before
+    error.value = String(e)
+  }
+}
+
 onMounted(async () => {
-  await Promise.all([loadCatalog(), loadStorage(), loadUnits()])
+  await Promise.all([loadCatalog(), loadStorage(), loadUnits(), loadAutoRefresh()])
 
   EventsOn('mediaitems:progress', ({ phase, percent }) => {
     downloadPhase.value = phase
@@ -215,14 +237,30 @@ async function rebuildIndex() {
   }
 }
 
+// The setup screen needs a catalog before it can hand over to the library,
+// and a fresh install has none. Syncing is part of getting started rather than
+// a separate visit to Settings — which the setup screen cannot reach anyway.
+const catalogReady = computed(() => catalog.value.devMode || !!catalog.value.sha)
+
+const startLabel = computed(() => {
+  if (downloading.value) return syncLabel.value
+  if (saving.value) return 'Starting…'
+  return catalogReady.value ? 'Get Started' : 'Download the catalog and get started'
+})
+
 // save finishes first-run setup. There is no path to persist any more — the
-// storage location was already written to the shared list when it was added — so
-// this only confirms the catalog is usable before leaving the setup screen.
+// storage location was already written to the shared list when it was added —
+// so this fetches the catalog if there is none yet and confirms it is usable
+// before leaving the setup screen.
 async function save() {
   if (!units.value.length) return
   saving.value = true
   error.value = null
   try {
+    if (!catalogReady.value) {
+      await syncCatalog()
+      if (error.value) return
+    }
     const warning = await ValidateMediaItemsPath()
     if (warning) {
       error.value = warning
@@ -245,7 +283,8 @@ async function save() {
       <p class="setup-subtitle">
         Choose where PortForge should keep what it builds and imports. This folder is
         shared with the other MediaItem programs on this machine, and you can add more
-        later. You can sync the port catalog from Settings afterwards.
+        later. PortForge then downloads the port catalog, which is small and takes a
+        moment.
       </p>
 
       <div class="setup-units">
@@ -258,12 +297,20 @@ async function save() {
         </button>
       </div>
 
+      <label class="toggle-row">
+        <input type="checkbox" :checked="autoRefresh" @change="setAutoRefresh($event.target.checked)" />
+        <span>Check for a newer catalog whenever PortForge starts</span>
+      </label>
+
       <p v-if="unitsError" class="error-text">{{ unitsError }}</p>
       <p v-if="error" class="error-text">{{ error }}</p>
 
-      <button class="btn-primary" :disabled="!units.length || saving" @click="save">
-        Get Started
+      <button class="btn-primary" :disabled="!units.length || saving || downloading" @click="save">
+        {{ startLabel }}
       </button>
+      <div v-if="downloading" class="card-progress setup-progress">
+        <div class="card-progress-fill" :style="{ width: downloadPercent + '%' }" />
+      </div>
     </div>
   </div>
 
@@ -300,6 +347,11 @@ async function save() {
       <div v-if="downloading" class="card-progress">
         <div class="card-progress-fill" :style="{ width: downloadPercent + '%' }" />
       </div>
+
+      <label class="toggle-row card-toggle" :class="{ disabled: catalog.devMode }">
+        <input type="checkbox" :checked="autoRefresh" :disabled="catalog.devMode" @change="setAutoRefresh($event.target.checked)" />
+        <span>Check for a newer catalog whenever PortForge starts, and fetch it in the background</span>
+      </label>
     </section>
 
     <header class="section-head">
@@ -481,6 +533,28 @@ async function save() {
   height: 100%;
   background: var(--accent);
   transition: width 200ms ease;
+}
+
+.toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12.5px;
+  color: var(--text);
+  cursor: pointer;
+
+  input { accent-color: var(--accent); }
+  &.disabled { opacity: 0.5; cursor: default; }
+}
+
+/* Spans the card below the buttons, like the progress bar. */
+.card-toggle {
+  flex-basis: 100%;
+  margin-top: 4px;
+}
+
+.setup-progress {
+  margin-top: 14px;
 }
 
 /* ── Library folder ───────────────────────────────────────────────────────── */

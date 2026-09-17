@@ -2,7 +2,22 @@
 
 All notable changes to PortForge are recorded here.
 
-## v0.3.2-alpha — Unreleased
+## v0.3.3-alpha — Unreleased
+
+### Added
+
+**The catalog is downloaded during first-run setup, and kept fresh after that.** A fresh
+install used to arrive with an empty library and a setup screen that would not let you
+past it until the catalog was synced — from a Settings page the setup screen does not
+offer. Getting started now fetches the catalog and builds the index as its final step.
+From then on PortForge checks for a newer catalog whenever it starts and fetches one in
+the background when there is, with a notice once the library has been refreshed; the
+check is one small request and the download happens only when something changed. A
+switch on the Settings page turns it off. This is the first setting PortForge keeps for
+itself since the library folder moved to the shared storage list; it lives in
+`preferences.json` in the configuration directory.
+
+## v0.3.2-alpha — 2026-09-16
 
 ### Added
 

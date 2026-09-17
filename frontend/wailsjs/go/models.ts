@@ -61,6 +61,7 @@ export namespace main {
 	}
 	export class Settings {
 	    dataPath: string;
+	    autoRefreshCatalog: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new Settings(source);
@@ -69,6 +70,7 @@ export namespace main {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.dataPath = source["dataPath"];
+	        this.autoRefreshCatalog = source["autoRefreshCatalog"];
 	    }
 	}
 

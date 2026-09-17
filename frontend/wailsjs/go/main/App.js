@@ -134,6 +134,10 @@ export function ReorderStorageUnits(arg1) {
   return window['go']['main']['App']['ReorderStorageUnits'](arg1);
 }
 
+export function SetAutoRefreshCatalog(arg1) {
+  return window['go']['main']['App']['SetAutoRefreshCatalog'](arg1);
+}
+
 export function SelectROMFiles() {
   return window['go']['main']['App']['SelectROMFiles']();
 }

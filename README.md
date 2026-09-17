@@ -134,7 +134,16 @@ On first launch PortForge asks for one folder:
 | -------------------- | -------------------------------------------------------------------------------- |
 | **User data folder** | Writable. PortForge stores your ROM files, installed games, and save state here. |
 
-The MediaItems library is managed automatically by PortForge and stored in the OS configuration directory.
+It then downloads the port catalog — a few tens of megabytes, mostly artwork — and builds
+its index before showing the library. The catalog is managed by PortForge and stored in
+the OS configuration directory.
+
+Afterwards, PortForge checks for a newer catalog every time it starts and fetches one in
+the background when there is; a notice appears once the library has been refreshed. The
+check is a single small request and the download only happens when something changed.
+**Check for a newer catalog whenever PortForge starts** on the **Settings** page turns
+it off, in which case **Refresh catalog** on the same page is how you update by hand.
+The choice is kept in `preferences.json` in the configuration directory.
 
 ---
 
@@ -156,7 +165,7 @@ mediaitems/
         └── .mediaitem.json     ← ROM title, platform, expected checksums
 ```
 
-ROM item types name the platform, the medium and the form: `N64CartRom`, `NESCartRom`, `GBCartRom`, `GBCCartRom`, `PS1DiscImage`, `Xbox360DiscImage`.
+ROM item types name the platform, the medium and the form: `N64CartRom`, `NESCartRom`, `GBCartRom`, `GBCCartRom`, `GameCubeDiscImage`, `PS1DiscImage`, `Xbox360DiscImage`.
 
 A SQLite index (`library.db` in the config directory) caches the listing fields from these JSON files and the presence of user ROM files so lookups are fast without re-parsing files on every page open. The index is rebuilt automatically after each sync, and can be refreshed manually at any time via **Refresh index** on the **Settings** page.
 

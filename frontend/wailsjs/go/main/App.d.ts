@@ -71,6 +71,8 @@ export function RenameStorageUnit(arg1:string,arg2:string):Promise<void>;
 
 export function ReorderStorageUnits(arg1:Array<string>):Promise<void>;
 
+export function SetAutoRefreshCatalog(arg1:boolean):Promise<void>;
+
 export function SelectROMFiles():Promise<Array<string>>;
 
 export function SyncMediaItems():Promise<void>;

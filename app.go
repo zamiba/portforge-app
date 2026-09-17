@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -37,11 +38,13 @@ var (
 	httpAPIClient = &http.Client{Timeout: 15 * time.Second}
 )
 
-const (
-	mediaItemsZipURL  = "https://github.com/zamiba/portforge-mediaitems/archive/refs/heads/main.zip"
-	mediaItemsAPIURL  = "https://api.github.com/repos/zamiba/portforge-mediaitems/commits/main"
-	mediaItemsSHAFile = ".portforge-sha"
+// The two URLs are variables so a test can stand a local server in for GitHub.
+var (
+	mediaItemsZipURL = "https://github.com/zamiba/portforge-mediaitems/archive/refs/heads/main.zip"
+	mediaItemsAPIURL = "https://api.github.com/repos/zamiba/portforge-mediaitems/commits/main"
 )
+
+const mediaItemsSHAFile = ".portforge-sha"
 
 // GetMediaItemsSHA returns the short commit SHA of the currently installed
 // MediaItems library, or an empty string if not yet downloaded.
@@ -153,6 +156,12 @@ func (a *App) SyncMediaItems() error {
 	if devMetadataOverride != "" {
 		return fmt.Errorf("sync is disabled in dev mode")
 	}
+	// The startup refresh and a click on "Refresh catalog" can overlap; two
+	// syncs writing the same tree and rebuilding the same index would not.
+	if !a.syncMu.TryLock() {
+		return fmt.Errorf("a catalog sync is already running")
+	}
+	defer a.syncMu.Unlock()
 	destDir := a.metadataPath
 	if err := os.MkdirAll(destDir, 0755); err != nil {
 		return err
@@ -385,6 +394,10 @@ type App struct {
 	installMu     sync.RWMutex
 	installingFor string
 	installCancel context.CancelFunc // non-nil while an install is running
+
+	prefs     Preferences
+	prefsPath string
+	syncMu    sync.Mutex // held for the whole of a catalog sync
 }
 
 // GetActiveInstall returns the item title currently being installed, or "" if idle.
@@ -399,7 +412,8 @@ func NewApp() *App {
 }
 
 type Settings struct {
-	DataPath string `json:"dataPath"`
+	DataPath           string `json:"dataPath"`
+	AutoRefreshCatalog bool   `json:"autoRefreshCatalog"`
 }
 
 func configDir() (string, error) {
@@ -418,7 +432,14 @@ func configDir() (string, error) {
 // suite program edits the list.
 func (a *App) GetSettings() Settings {
 	a.syncDataPath()
-	return Settings{DataPath: a.dataPath}
+	return Settings{DataPath: a.dataPath, AutoRefreshCatalog: a.prefs.AutoRefreshCatalog}
+}
+
+// SetAutoRefreshCatalog records whether PortForge checks for a newer catalog
+// when it starts. It takes effect on the next start; nothing is fetched now.
+func (a *App) SetAutoRefreshCatalog(on bool) error {
+	a.prefs.AutoRefreshCatalog = on
+	return savePreferences(a.prefsPath, a.prefs)
 }
 
 // ValidateMediaItemsPath checks the configured paths and returns a human-readable
@@ -462,6 +483,8 @@ func (a *App) requireNativeDialogs(what string) error {
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+	a.prefsPath = preferencesPath()
+	a.prefs = loadPreferences(a.prefsPath)
 
 	// In dev mode the project-local mediaitem folder is used; otherwise the
 	// catalog lives in the OS config directory and is never user-configurable.
@@ -499,6 +522,45 @@ func (a *App) startup(ctx context.Context) {
 			}
 		}
 	}
+
+	if a.shouldAutoRefreshCatalog() {
+		go a.refreshCatalogIfChanged()
+	}
+}
+
+// shouldAutoRefreshCatalog decides whether startup checks GitHub for a newer
+// catalog. Never in dev mode, where the catalog is the project checkout; never
+// when the user has turned it off; and never before the first sync, which is
+// the first-run screen's to do with the user watching — a background download
+// there would race the screen that reports it.
+func (a *App) shouldAutoRefreshCatalog() bool {
+	if devMetadataOverride != "" || !a.prefs.AutoRefreshCatalog || a.metadataPath == "" {
+		return false
+	}
+	_, err := os.Stat(filepath.Join(a.metadataPath, mediaItemsSHAFile))
+	return err == nil
+}
+
+// refreshCatalogIfChanged is the background half of auto-refresh: one request
+// to compare commit SHAs, and a full sync only when they differ. Being offline
+// is not an error worth a dialog at startup, so failures go to the log and the
+// Settings screen's own check remains the way to see them.
+func (a *App) refreshCatalogIfChanged() {
+	changed, err := a.CheckMediaItemsUpdate()
+	if err != nil {
+		log.Printf("catalog auto-refresh: %v", err)
+		return
+	}
+	if !changed {
+		return
+	}
+	a.emit("catalog:refreshing", nil)
+	if err := a.SyncMediaItems(); err != nil {
+		log.Printf("catalog auto-refresh: %v", err)
+		a.emit("catalog:refresh-failed", map[string]interface{}{"error": err.Error()})
+		return
+	}
+	a.emit("catalog:refreshed", a.GetCatalogInfo())
 }
 
 // GetPlatform returns the host as a platform string with its architecture
