@@ -82,6 +82,20 @@ A `copy from:"rom"` step fails the install when no matching ROM is in the librar
 
 ---
 
+## The `profile` provider
+
+`${profilePath}` in a `defineExecutable` step's `args` is the folder the active profile keeps for this port — saves, configuration, whatever the port writes — resolved every time the game is launched, like `${romPath}`. PortForge supplies only the path; the port's own flag says what it is for, which is why ports with different flags need no different handling:
+
+```json
+{ "step": "defineExecutable", "executable": "install/game", "title": "Play", "args": ["--save-dir", "${profilePath}"] }
+```
+
+The folder is created the first time the game starts, so a port need not tolerate its absence. It mirrors the port's own folder on the storage unit: `<profiles>/<profile>/MediaItems/VideoGameFanPort/<port item title>/`. `${profilePath}` takes no qualifier; `${profilePath.x}` is a launch error.
+
+This is the arrangement to prefer for a port that accepts one. A port whose save location cannot be redirected keeps `userDataPaths` (below), which PortForge will link into the same profile folder in a later release.
+
+---
+
 ## Dependencies and the `run` step
 
 A spec's `dependencies` array serves two purposes: PortForge verifies each command is on `PATH` before starting and reports the missing ones, and the same array is the allowlist for `run`. A spec may only invoke commands it has declared, so the array is a complete inventory of what an install can execute.
@@ -126,10 +140,21 @@ would lose them to the usual `deletePath install` teardown. Forge's file-level
 Paths interpolate `$name` like any other, `$platform` and `$version` included, and are
 reported by `forge check` if they reference something the spec never declares.
 
-This covers ports that keep user data beside their own files. A port that accepts a flag
-pointing its save directory elsewhere is the better arrangement — it is what per-profile
-support will need — and `userDataPaths` is what makes the ports that cannot do that safe
-in the meantime.
+This covers ports that keep user data beside their own files, and it is also how those
+ports reach the profile. Each declared path is **linked** into the active profile: the
+real files live at the same relative path under the profile's folder for the port
+(`<profile>/MediaItems/VideoGameFanPort/<port>/install/saves`, say) and the port's own
+path is a symlink — a junction on Windows — pointing at them. The game writes where it
+always did. PortForge makes the links after an install (moving in whatever an older
+install left), before each launch (so a profile switch takes effect) and after each
+session (so data a game created for the first time is in the profile before it is sent
+on). Nothing is ever merged: a path with data on both sides is left as it is and reported
+on the game page, and the game runs with its saves where they were. Single files cannot
+be linked without privileges on Windows and stay beside the game there.
+
+A port that accepts a flag pointing its save directory elsewhere is the simpler
+arrangement — give it `${profilePath}` (above) and declare nothing here. The two can
+coexist in one spec.
 
 ---
 

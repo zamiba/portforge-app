@@ -19,6 +19,11 @@ type Preferences struct {
 	// request, the download only happens when something changed, and a catalog
 	// that quietly goes stale is the failure this exists to prevent.
 	AutoRefreshCatalog bool `json:"autoRefreshCatalog"`
+
+	// ActiveProfile is the slug of the profile saves and settings go to. Empty
+	// means PortForge's own default profile, which exists so that a person who
+	// does not want profiles never has to think about them — see profiles.go.
+	ActiveProfile string `json:"activeProfile,omitempty"`
 }
 
 func defaultPreferences() Preferences {

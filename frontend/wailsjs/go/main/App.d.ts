@@ -15,7 +15,11 @@ export function CheckMediaItemsUpdate():Promise<boolean>;
 
 export function CleanBuildDir(arg1:string):Promise<void>;
 
+export function CreateProfile(arg1:string):Promise<main.ProfileInfo>;
+
 export function GetActiveInstall():Promise<string>;
+
+export function GetCatalogActivity():Promise<main.CatalogActivity>;
 
 export function GetCatalogInfo():Promise<main.CatalogInfo>;
 
@@ -37,9 +41,13 @@ export function GetMediaItemsSHA():Promise<string>;
 
 export function GetPlatform():Promise<string>;
 
+export function GetProfiles():Promise<Array<main.ProfileInfo>>;
+
 export function GetROMLibrary():Promise<models.ROMLibrary>;
 
 export function GetROMStatus(arg1:string):Promise<Record<string, boolean>>;
+
+export function GetSaveLinks(arg1:string):Promise<main.SaveLinkStatus>;
 
 export function GetSettings():Promise<main.Settings>;
 
@@ -67,13 +75,19 @@ export function RefreshLibraryIndex():Promise<void>;
 
 export function RemoveStorageUnit(arg1:string):Promise<void>;
 
+export function RenameProfile(arg1:string,arg2:string):Promise<void>;
+
 export function RenameStorageUnit(arg1:string,arg2:string):Promise<void>;
 
 export function ReorderStorageUnits(arg1:Array<string>):Promise<void>;
 
-export function SetAutoRefreshCatalog(arg1:boolean):Promise<void>;
+export function RevealSaves(arg1:string):Promise<void>;
 
 export function SelectROMFiles():Promise<Array<string>>;
+
+export function SetActiveProfile(arg1:string):Promise<void>;
+
+export function SetAutoRefreshCatalog(arg1:boolean):Promise<void>;
 
 export function SyncMediaItems():Promise<void>;
 

@@ -334,15 +334,28 @@ const countLine = computed(() => {
    rows beneath them line up across a row. Art that is not 2:3 is letterboxed
    (`contain`) rather than cropped: the grid stays uniform without any cover
    losing its edges. The bars are painted by the image's own background, which
-   leaves the striped placeholder's background-color alone. */
+   leaves the striped placeholder's background-color alone.
+
+   The hairline is an overlay rather than a `border`: with border-box sizing a
+   real border shrinks the content box by 2px on each axis, so a 2:3 image no
+   longer fits a 2:3 tile exactly and `contain` leaves a one-pixel strip of
+   background along the top (or bottom) of every cover. */
 .cover {
   position: relative;
   width: 100%;
   aspect-ratio: 2 / 3;
-  border: 1px solid var(--line);
   border-radius: var(--r-cover);
   box-shadow: var(--shadow);
   overflow: hidden;
+
+  &::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border: 1px solid var(--line);
+    border-radius: inherit;
+    pointer-events: none;
+  }
   /* Deliberately not animated on hover. Lifting the card is cheap on Chromium and
      WKWebView but not on WebKitGTK, where moving the pointer across a full grid
      is the most visible stutter in the app — and the grid is the view people

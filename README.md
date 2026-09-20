@@ -32,12 +32,14 @@ I freelance full time, so every bit of support is time that I can spend on this 
 
 Builds for each release are on the [releases page](https://github.com/zamiba/portforge-app/releases).
 
+File names carry the version, shown here as `<version>`, so a `portforge-0.3.4-alpha-linux-amd64` on disk is still identifiable later.
+
 | Platform | File |
 | -------- | ---- |
-| Windows 10+ | `portforge.exe` |
-| macOS 12+ | `portforge-macos.zip` |
-| Linux, webkit2gtk **4.0** | `portforge-linux-amd64` |
-| Linux, webkit2gtk **4.1** | `portforge-linux-amd64-webkit4_1` |
+| Windows 10+ | `portforge-<version>-windows-amd64.exe` |
+| macOS 12+ | `portforge-<version>-macos-universal.zip` |
+| Linux, webkit2gtk **4.0** | `portforge-<version>-linux-amd64` |
+| Linux, webkit2gtk **4.1** | `portforge-<version>-linux-amd64-webkit4_1` |
 
 **Which Linux build?** PortForge draws its interface with your system's WebKitGTK, and distributions ship one of two incompatible series of it. To see which you have:
 
@@ -50,8 +52,8 @@ ldconfig -p | grep libwebkit2gtk
 The Linux downloads are plain binaries, so mark one executable and run it:
 
 ```bash
-chmod +x portforge-linux-amd64
-./portforge-linux-amd64
+chmod +x portforge-*-linux-amd64
+./portforge-*-linux-amd64
 ```
 
 Builds are unsigned. **macOS** will refuse to open the app the first time: right-click it and choose **Open**, or run `xattr -d com.apple.quarantine portforge.app` first. **Windows** shows a SmartScreen warning — choose **More info → Run anyway**.
@@ -170,6 +172,33 @@ ROM item types name the platform, the medium and the form: `N64CartRom`, `NESCar
 A SQLite index (`library.db` in the config directory) caches the listing fields from these JSON files and the presence of user ROM files so lookups are fast without re-parsing files on every page open. The index is rebuilt automatically after each sync, and can be refreshed manually at any time via **Refresh index** on the **Settings** page.
 
 ---
+
+## Profiles
+
+Saves and settings go to a profile: a folder shared with the other MediaItem programs on
+this machine, so what each records about a person sits together and the whole thing can
+be copied or synced to another device however you like. PortForge does not sync or merge
+profiles itself; when a play session ends it tells the shared profiles module that the
+profile changed, and that module does whatever you have set up — nothing, by default. If
+the profile folder is a git repository, each session ends in a commit (`portforge: game
+ended: <port>`), pushed if `MediaItem/profile-sync.json` names a remote; the same file can
+name `rclone-copy`, `rclone-sync` or `syncthing` backends. See the
+[`go-mediaitems-profiles`](https://github.com/zamiba/go-mediaitems-profiles) README for
+the file's shape. What came back is shown briefly in the app; failures are logged too.
+First-run setup asks for a name;
+leave it blank and PortForge keeps everything under a profile named `portforge`, which
+is an ordinary profile you can rename or replace later. Settings lists the profiles on
+this machine and switches between them, from the next launch on; a switch while a game
+is running is refused.
+
+Profiles live at `MediaItem/profiles/<profile>/` in the configuration directory, beside
+the storage-unit list, and inside one a port's data is at
+`MediaItems/VideoGameFanPort/<port>/`. A port that takes a flag for its save location
+receives that folder at launch (`${profilePath}` in its spec); one that keeps its saves
+beside itself has those paths (`userDataPaths`) linked into the same folder, so the game
+writes where it always did and the data lands in the profile. Both are described in
+[`docs/build-system.md`](docs/build-system.md). Data is never merged: if a path holds
+data on both sides, PortForge leaves both alone and says so on the game page.
 
 ## User library
 

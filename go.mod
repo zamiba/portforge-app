@@ -5,7 +5,8 @@ go 1.25.0
 require (
 	github.com/wailsapp/wails/v2 v2.12.0
 	github.com/zamiba/forge v0.0.8-alpha
-	github.com/zamiba/go-mediaitems v0.1.0
+	github.com/zamiba/go-mediaitems v0.2.0
+	github.com/zamiba/go-mediaitems-profiles v0.1.0
 	golang.org/x/sys v0.42.0
 	modernc.org/sqlite v1.50.1
 )

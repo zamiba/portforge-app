@@ -835,15 +835,24 @@ function formatDate(iso) {
 .hero-cover {
   width: 150px;
   flex-shrink: 0;
-  border: 1px solid var(--line2);
   border-radius: var(--r-cover);
   box-shadow: var(--shadow);
   overflow: hidden;
 
-  /* Letterboxed to the catalog's 2:3, matching the library grid. */
+  /* Letterboxed to the catalog's 2:3, matching the library grid. The hairline
+     is an overlay for the reason given on .cover in GameLibrary. */
   aspect-ratio: 2 / 3;
   position: relative;
   img { width: 100%; height: 100%; object-fit: contain; background: var(--panel2); display: block; }
+
+  &::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border: 1px solid var(--line2);
+    border-radius: inherit;
+    pointer-events: none;
+  }
 }
 
 .hero-text {
@@ -1063,6 +1072,8 @@ function formatDate(iso) {
   gap: 12px;
 }
 
+/* Descriptions are the developers' own Markdown, rendered as they wrote it, so
+   every construct a README uses needs a look here — not only paragraphs. */
 .description {
   font-size: 15px;
   line-height: 1.65;
@@ -1070,9 +1081,41 @@ function formatDate(iso) {
   text-wrap: pretty;
   color: var(--text);
 
-  :deep(p) { margin: 0 0 12px; }
-  :deep(p:last-child) { margin-bottom: 0; }
+  :deep(p), :deep(ul), :deep(ol), :deep(blockquote), :deep(pre) { margin: 0 0 12px; }
+  :deep(> :last-child) { margin-bottom: 0; }
   :deep(a) { color: var(--accent); }
+  :deep(strong) { font-weight: 600; }
+  :deep(ul), :deep(ol) { padding-left: 22px; }
+  :deep(li) { margin-bottom: 4px; }
+  :deep(li:last-child) { margin-bottom: 0; }
+  :deep(h1), :deep(h2), :deep(h3), :deep(h4) {
+    margin: 18px 0 6px;
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: -0.005em;
+  }
+  :deep(> h1:first-child), :deep(> h2:first-child), :deep(> h3:first-child) { margin-top: 0; }
+  :deep(code) {
+    font-family: var(--font-mono);
+    font-size: 0.88em;
+    padding: 1px 5px;
+    border-radius: 4px;
+    background: var(--panel2);
+  }
+  :deep(pre) {
+    padding: 10px 12px;
+    border-radius: var(--r-control);
+    background: var(--panel2);
+    overflow-x: auto;
+    code { padding: 0; background: none; }
+  }
+  :deep(blockquote) {
+    padding-left: 12px;
+    border-left: 2px solid var(--line2);
+    color: var(--dim);
+  }
+  :deep(hr) { border: 0; border-top: 1px solid var(--line); margin: 16px 0; }
+  :deep(img) { max-width: 100%; border-radius: var(--r-thumb); }
 }
 
 .notes-date {

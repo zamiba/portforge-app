@@ -22,8 +22,16 @@ export function CleanBuildDir(arg1) {
   return window['go']['main']['App']['CleanBuildDir'](arg1);
 }
 
+export function CreateProfile(arg1) {
+  return window['go']['main']['App']['CreateProfile'](arg1);
+}
+
 export function GetActiveInstall() {
   return window['go']['main']['App']['GetActiveInstall']();
+}
+
+export function GetCatalogActivity() {
+  return window['go']['main']['App']['GetCatalogActivity']();
 }
 
 export function GetCatalogInfo() {
@@ -66,12 +74,20 @@ export function GetPlatform() {
   return window['go']['main']['App']['GetPlatform']();
 }
 
+export function GetProfiles() {
+  return window['go']['main']['App']['GetProfiles']();
+}
+
 export function GetROMLibrary() {
   return window['go']['main']['App']['GetROMLibrary']();
 }
 
 export function GetROMStatus(arg1) {
   return window['go']['main']['App']['GetROMStatus'](arg1);
+}
+
+export function GetSaveLinks(arg1) {
+  return window['go']['main']['App']['GetSaveLinks'](arg1);
 }
 
 export function GetSettings() {
@@ -126,6 +142,10 @@ export function RemoveStorageUnit(arg1) {
   return window['go']['main']['App']['RemoveStorageUnit'](arg1);
 }
 
+export function RenameProfile(arg1, arg2) {
+  return window['go']['main']['App']['RenameProfile'](arg1, arg2);
+}
+
 export function RenameStorageUnit(arg1, arg2) {
   return window['go']['main']['App']['RenameStorageUnit'](arg1, arg2);
 }
@@ -134,12 +154,20 @@ export function ReorderStorageUnits(arg1) {
   return window['go']['main']['App']['ReorderStorageUnits'](arg1);
 }
 
-export function SetAutoRefreshCatalog(arg1) {
-  return window['go']['main']['App']['SetAutoRefreshCatalog'](arg1);
+export function RevealSaves(arg1) {
+  return window['go']['main']['App']['RevealSaves'](arg1);
 }
 
 export function SelectROMFiles() {
   return window['go']['main']['App']['SelectROMFiles']();
+}
+
+export function SetActiveProfile(arg1) {
+  return window['go']['main']['App']['SetActiveProfile'](arg1);
+}
+
+export function SetAutoRefreshCatalog(arg1) {
+  return window['go']['main']['App']['SetAutoRefreshCatalog'](arg1);
 }
 
 export function SyncMediaItems() {

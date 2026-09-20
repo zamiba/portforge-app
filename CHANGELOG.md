@@ -2,7 +2,66 @@
 
 All notable changes to PortForge are recorded here.
 
-## v0.3.3-alpha — Unreleased
+## v0.3.4-alpha — Unreleased
+
+### Added
+
+**A catalog update or index rebuild is shown in a status bar, wherever you are.** A sync
+used to be visible only on the Settings page that started it, and the background refresh
+at startup only as a one-line notice — so a library that went quiet or changed under you
+had no explanation on screen. The catalog now reports what it is doing the same way an
+install does: a bar across the top with the phase and its progress, whether the job was
+started from Settings, from first-run setup, or by PortForge itself at startup. Clicking
+it opens Settings; a failure stays in the bar until dismissed. The Settings page shows the
+same state, so its buttons are disabled while a background refresh runs, and a page that
+opens mid-sync picks it up rather than waiting for the next event. Rebuilding the index
+is refused while a sync runs, since the sync rebuilds it itself.
+
+**Saves go to a profile, and a port that takes a save-location flag receives its folder
+at launch.** Profiles are the suite's shared notion of a person: a folder beside the
+storage-unit list that every MediaItem program on the machine reads, so achievements and
+watched episodes recorded by other programs sit next to the saves, and one folder can be
+copied or synced to another device by whatever means the user prefers — PortForge itself
+does not sync, snapshot or merge them. Nobody has to create one: first-run setup asks
+for a name and a blank answer means a `portforge` profile made behind the scenes, an
+ordinary profile that can be renamed or replaced. Settings lists profiles, creates and
+renames them and switches between them; a switch is refused while a game runs. A spec can
+now put `${profilePath}` in a `defineExecutable` step's `args`, next to the port's own
+flag — `"args": ["--save-dir", "${profilePath}"]` — and PortForge resolves it to the
+active profile's folder for that port every time the game starts, creating it on first
+use. A port that keeps its saves beside itself — the paths its spec lists in
+`userDataPaths` — has those paths linked into the profile instead: the files move there,
+the port's path becomes a link to them, and the game writes where it always did. Links are
+made after an install, before each launch (so switching profiles takes effect) and after
+each session. Data is never merged; a path with data on both sides is left alone and
+reported. On Windows, folders are linked as junctions and single files stay with the game.
+When a session ends
+PortForge tells the profiles module the profile changed, and the module sends it wherever
+`MediaItem/profile-sync.json` says — a git commit if the profile is a repository, with a
+push if a remote is named; rclone or Syncthing if configured; nothing otherwise — in the
+background, with the outcome shown briefly and failures logged. PortForge itself never
+runs a sync tool. Built on the new `go-mediaitems-profiles` module (v0.1.0) and
+`go-mediaitems` v0.2.0.
+
+### Changed
+
+**Release files are named after their version.** A download is
+`portforge-0.3.4-alpha-linux-amd64` rather than `portforge-linux-amd64`, so two builds
+kept side by side can be told apart, and the Windows and macOS files follow the same
+pattern (`portforge-<version>-windows-amd64.exe`, `portforge-<version>-macos-universal.zip`).
+
+### Fixed
+
+**Covers no longer show a hairline of background along their top edge.** The tile's
+one-pixel border shrank the box the image had to fit, so a 2:3 cover could not fill a 2:3
+tile exactly and left a strip of background showing. The border is now drawn over the
+image instead of around it.
+
+**Every Markdown construct in a description is styled.** Descriptions have always been
+rendered as Markdown, but only paragraphs and links had a look of their own; lists,
+headings, code, quotes and rules fell back to the browser's defaults.
+
+## v0.3.3-alpha — 2026-09-17
 
 ### Added
 

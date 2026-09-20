@@ -21,6 +21,24 @@ export namespace engine {
 
 export namespace main {
 	
+	export class CatalogActivity {
+	    kind: string;
+	    phase: string;
+	    percent: number;
+	    error?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new CatalogActivity(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.kind = source["kind"];
+	        this.phase = source["phase"];
+	        this.percent = source["percent"];
+	        this.error = source["error"];
+	    }
+	}
 	export class CatalogInfo {
 	    sha: string;
 	    syncedAt: string;
@@ -59,9 +77,82 @@ export namespace main {
 	        this.libraryBytes = source["libraryBytes"];
 	    }
 	}
+	export class ProfileInfo {
+	    slug: string;
+	    name: string;
+	    createdBy?: string;
+	    active: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new ProfileInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.slug = source["slug"];
+	        this.name = source["name"];
+	        this.createdBy = source["createdBy"];
+	        this.active = source["active"];
+	    }
+	}
+	export class SaveLink {
+	    path: string;
+	    state: string;
+	    reason?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new SaveLink(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.path = source["path"];
+	        this.state = source["state"];
+	        this.reason = source["reason"];
+	    }
+	}
+	export class SaveLinkStatus {
+	    profile: string;
+	    slug: string;
+	    folder: string;
+	    links: SaveLink[];
+	    failed: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new SaveLinkStatus(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.profile = source["profile"];
+	        this.slug = source["slug"];
+	        this.folder = source["folder"];
+	        this.links = this.convertValues(source["links"], SaveLink);
+	        this.failed = source["failed"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class Settings {
 	    dataPath: string;
 	    autoRefreshCatalog: boolean;
+	    activeProfile: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new Settings(source);
@@ -71,6 +162,7 @@ export namespace main {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.dataPath = source["dataPath"];
 	        this.autoRefreshCatalog = source["autoRefreshCatalog"];
+	        this.activeProfile = source["activeProfile"];
 	    }
 	}
 
@@ -242,6 +334,7 @@ export namespace models {
 	    activeMods: string[];
 	    args?: Record<string, string>;
 	    targetPlatform?: string;
+	    userDataPaths?: string[];
 	    installedAt: string;
 	    totalPlaySeconds: number;
 	    lastPlayedAt?: string;
@@ -259,6 +352,7 @@ export namespace models {
 	        this.activeMods = source["activeMods"];
 	        this.args = source["args"];
 	        this.targetPlatform = source["targetPlatform"];
+	        this.userDataPaths = source["userDataPaths"];
 	        this.installedAt = source["installedAt"];
 	        this.totalPlaySeconds = source["totalPlaySeconds"];
 	        this.lastPlayedAt = source["lastPlayedAt"];

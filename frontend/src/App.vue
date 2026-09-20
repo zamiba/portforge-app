@@ -1,8 +1,9 @@
 <script setup>
 import { ref, computed, provide, onMounted, onUnmounted } from 'vue'
-import { GetVersions, GetVersion, GetLibraryStatus, GetPlatform, GetActiveInstall, InstallVersion, CancelInstall, GetSettings, ValidateMediaItemsPath, MatchDroppedROMs, ImportROMs } from '../wailsjs/go/main/App'
+import { GetVersions, GetVersion, GetLibraryStatus, GetPlatform, GetActiveInstall, GetCatalogActivity, InstallVersion, CancelInstall, GetSettings, ValidateMediaItemsPath, MatchDroppedROMs, ImportROMs } from '../wailsjs/go/main/App'
 import { EventsOn, EventsOff } from '../wailsjs/runtime/runtime'
 import { artworkUrl, ART_WIDTH } from './lib/artwork'
+import { catalogActivityTitle, catalogActivityLabel, catalogActivityPercent } from './lib/catalog'
 import Sidebar from './components/Sidebar.vue'
 import GameLibrary from './components/GameLibrary.vue'
 import GameDetail from './components/GameDetail.vue'
@@ -23,8 +24,7 @@ const needsSetup = ref(false)
 const libraryWarning = ref(null)
 
 // A quiet notice for things that happen on their own — the startup catalog
-// refresh — shown briefly and never in the way. The refreshing state stays up
-// until the refresh ends, so the notice cannot be missed between the two.
+// refresh finishing — shown briefly and never in the way.
 const notice = ref(null)
 let noticeTimer = null
 function showNotice(text, ms = 6000) {
@@ -36,6 +36,38 @@ function showNotice(text, ms = 6000) {
 const pendingDrop = ref(null)  // ROMDropSummary from MatchDroppedROMs
 const dropError = ref(null)
 const dropMatching = ref(false)
+
+// ── Catalog activity ────────────────────────────────────────────────────────
+// What the catalog is doing — a sync or an index rebuild — whoever started it:
+// the Settings page, the first-run screen or the background refresh at startup.
+// Tracked here, like an install, so it is shown wherever the user is. A failure
+// stays until dismissed; a finished job clears itself.
+const catalogActivity = ref(null) // { kind, phase, percent, error }
+provide('catalogActivity', catalogActivity)
+
+async function onCatalogActivity(act) {
+  if (act.phase === 'done') {
+    catalogActivity.value = null
+    // The first-run screen loads the library itself once it hands over.
+    if (!needsSetup.value) await loadLibrary()
+    return
+  }
+  catalogActivity.value = act
+}
+
+// Settings shows the catalog's own progress on its card, and the first-run
+// screen is Settings; everywhere else the status bar carries it.
+const showCatalogBanner = computed(() =>
+  catalogActivity.value !== null && !needsSetup.value && activeTab.value !== 'settings'
+)
+const catalogBannerTitle = computed(() => catalogActivityTitle(catalogActivity.value))
+const catalogBannerLabel = computed(() => catalogActivityLabel(catalogActivity.value))
+const catalogBannerPercent = computed(() => catalogActivityPercent(catalogActivity.value))
+
+function openSettings() {
+  activeTab.value = 'settings'
+  selectedGame.value = null
+}
 
 // ── Global install state ────────────────────────────────────────────────────
 // Persists across navigation so background installs are tracked app-wide.
@@ -159,12 +191,16 @@ onMounted(async () => {
   // Registered before the library loads: the startup refresh runs in the
   // background from the moment the backend is up, and its "done" must not
   // fall between our first read of the catalog and our subscribing to it.
-  EventsOn('catalog:refreshing', () => showNotice('Updating the port catalog…', 0))
-  EventsOn('catalog:refreshed', async () => {
-    await loadLibrary()
-    showNotice('Port catalog updated')
-  })
-  EventsOn('catalog:refresh-failed', () => { notice.value = null })
+  EventsOn('catalog:activity', onCatalogActivity)
+  // The refresh reloads the library through catalog:activity like any other
+  // sync; this is only the word that it happened, since nobody asked for it.
+  EventsOn('catalog:refreshed', () => showNotice('Port catalog updated'))
+  // A sync already under way when the page loads — the startup refresh, or a
+  // page reloaded under -server — has no events behind it to replay.
+  try {
+    const act = await GetCatalogActivity()
+    if (act?.kind) catalogActivity.value = act
+  } catch { /* idle */ }
 
   const settings = await GetSettings()
   if (!settings.dataPath) {
@@ -223,12 +259,20 @@ onMounted(async () => {
     playTimer = null
     playingTitle.value = null
   })
+
+  // After a session the profile may be sent on — a git commit, an rclone
+  // copy — by whatever the user configured. A failure is worth a line; a
+  // success only when something was actually done, so a profile that is a
+  // repository with nothing new does not announce itself every time.
+  EventsOn('profile:synced', ({ kind, output, error }) => {
+    if (error) showNotice(`Profile sync (${kind}) failed: ${error}`, 12000)
+    else if (output && output !== 'nothing to commit') showNotice(`Profile ${kind}: ${output}`)
+  })
 })
 
 onUnmounted(() => {
-  EventsOff('catalog:refreshing')
+  EventsOff('catalog:activity')
   EventsOff('catalog:refreshed')
-  EventsOff('catalog:refresh-failed')
   EventsOff('install:started')
   EventsOff('install:progress')
   EventsOff('install:step')
@@ -238,6 +282,7 @@ onUnmounted(() => {
   EventsOff('wails:file-drop')
   EventsOff('game:started')
   EventsOff('game:ended')
+  EventsOff('profile:synced')
   clearInterval(playTimer)
 })
 
@@ -336,6 +381,17 @@ function dismissDrop() {
         <button class="btn-ghost" @click="dropError = null">✕</button>
       </div>
 
+      <div v-if="showCatalogBanner" class="install-banner" @click="openSettings">
+        <div class="install-banner-text">
+          <span class="install-banner-title">{{ catalogBannerTitle }}</span>
+          <span class="install-banner-label">{{ catalogBannerLabel }}</span>
+        </div>
+        <div class="install-banner-bar">
+          <div class="install-banner-fill" :style="{ width: catalogBannerPercent + '%' }" />
+        </div>
+        <button v-if="catalogActivity.phase === 'failed'" class="btn-stop-install" @click.stop="catalogActivity = null">Dismiss</button>
+      </div>
+
       <div v-if="showInstallBanner" class="install-banner" @click.self="GetVersion(activeInstall.itemTitle).then(full => { selectedGame = full }).catch(() => {})">
         <div class="install-banner-text" style="cursor:pointer" @click="GetVersion(activeInstall.itemTitle).then(full => { selectedGame = full }).catch(() => {})">
           <span class="install-banner-title">Installing {{ activeInstall.failed ? '— failed' : '' }}</span>
@@ -348,7 +404,7 @@ function dismissDrop() {
       </div>
 
       <main>
-        <Settings v-if="needsSetup" :setup="true" @saved="onSettingsSaved" @refreshed="loadLibrary" />
+        <Settings v-if="needsSetup" :setup="true" @saved="onSettingsSaved" />
         <template v-else>
           <div v-if="error" class="error">{{ error }}</div>
           <GameDetail
@@ -363,7 +419,7 @@ function dismissDrop() {
           />
           <Settings
             v-else-if="activeTab === 'settings'"
-            @saved="onSettingsSaved" @refreshed="loadLibrary"
+            @saved="onSettingsSaved"
           />
           <GameLibrary
             v-else

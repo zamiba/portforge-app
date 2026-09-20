@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/md5"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -16,6 +17,8 @@ import (
 	"portforge/models"
 	"portforge/store"
 
+	"github.com/zamiba/go-mediaitems-profiles/profile"
+	"github.com/zamiba/go-mediaitems-profiles/profilesync"
 	"github.com/zamiba/go-mediaitems/storageunit"
 	"runtime"
 	"strings"
@@ -139,12 +142,30 @@ func (a *App) RefreshLibraryIndex() error {
 	if a.store == nil {
 		return fmt.Errorf("store not initialised")
 	}
-	if err := a.store.RebuildCatalog(a.metadataPath); err != nil {
+	// A sync rebuilds the index itself; two rebuilds at once would race on it.
+	if !a.syncMu.TryLock() {
+		return fmt.Errorf("a catalog sync is already running")
+	}
+	defer a.syncMu.Unlock()
+	a.setCatalogActivity(CatalogActivity{Kind: "index", Phase: phaseIndexing})
+	if err := a.rebuildIndex(a.metadataPath); err != nil {
+		a.setCatalogActivity(CatalogActivity{Kind: "index", Phase: phaseFailed, Error: err.Error()})
+		return err
+	}
+	a.setCatalogActivity(CatalogActivity{Kind: "index", Phase: phaseDone, Percent: 100})
+	return nil
+}
+
+// rebuildIndex re-reads the catalog into the store, then re-marks the user's
+// ROMs and pending updates against it so the library reflects the new catalog
+// at once.
+func (a *App) rebuildIndex(catalogDir string) error {
+	if err := a.store.RebuildCatalog(catalogDir); err != nil {
 		return err
 	}
 	if a.dataPath != "" {
 		_ = a.store.SyncUserROMs(a.dataPath)
-		_ = a.store.ScanUserLibraryUpdates(a.metadataPath, a.dataPath)
+		_ = a.store.ScanUserLibraryUpdates(catalogDir, a.dataPath)
 	}
 	return nil
 }
@@ -162,6 +183,21 @@ func (a *App) SyncMediaItems() error {
 		return fmt.Errorf("a catalog sync is already running")
 	}
 	defer a.syncMu.Unlock()
+
+	progress := func(phase string, pct int) {
+		a.setCatalogActivity(CatalogActivity{Kind: "sync", Phase: phase, Percent: pct})
+	}
+	if err := a.syncMediaItems(progress); err != nil {
+		a.setCatalogActivity(CatalogActivity{Kind: "sync", Phase: phaseFailed, Error: err.Error()})
+		return err
+	}
+	progress(phaseDone, 100)
+	return nil
+}
+
+// syncMediaItems is the body of SyncMediaItems: it reports each phase through
+// progress and leaves the terminal states to its caller.
+func (a *App) syncMediaItems(progress func(phase string, pct int)) error {
 	destDir := a.metadataPath
 	if err := os.MkdirAll(destDir, 0755); err != nil {
 		return err
@@ -175,7 +211,7 @@ func (a *App) SyncMediaItems() error {
 	tmpZip := tmp.Name()
 	defer os.Remove(tmpZip)
 
-	a.emit("mediaitems:progress", map[string]interface{}{"phase": "downloading", "percent": 0})
+	progress(phaseDownloading, 0)
 	resp, err := httpClient.Get(mediaItemsZipURL)
 	if err != nil {
 		tmp.Close()
@@ -184,9 +220,7 @@ func (a *App) SyncMediaItems() error {
 	pr := &progressReader{
 		r:     resp.Body,
 		total: resp.ContentLength,
-		onPct: func(pct int) {
-			a.emit("mediaitems:progress", map[string]interface{}{"phase": "downloading", "percent": pct})
-		},
+		onPct: func(pct int) { progress(phaseDownloading, pct) },
 	}
 	_, err = io.Copy(tmp, pr)
 	resp.Body.Close()
@@ -196,7 +230,7 @@ func (a *App) SyncMediaItems() error {
 	}
 
 	// Extract into a temp directory.
-	a.emit("mediaitems:progress", map[string]interface{}{"phase": "extracting", "percent": 0})
+	progress(phaseExtracting, 0)
 	tmpDir, err := os.MkdirTemp("", "portforge-mediaitems-*")
 	if err != nil {
 		return err
@@ -208,7 +242,7 @@ func (a *App) SyncMediaItems() error {
 	}
 
 	// Copy extracted files over destDir, overwriting existing files.
-	a.emit("mediaitems:progress", map[string]interface{}{"phase": "copying", "percent": 0})
+	progress(phaseCopying, 0)
 	if err := copyDirMerge(tmpDir, destDir); err != nil {
 		return fmt.Errorf("sync failed: %w", err)
 	}
@@ -223,17 +257,14 @@ func (a *App) SyncMediaItems() error {
 		}
 	}
 
-	// Rebuild the DB index from the updated catalog, then resync user ROMs and
-	// update-flags so the UI reflects the new catalog state immediately.
+	// Rebuild the DB index from the updated catalog so the UI reflects the new
+	// catalog state immediately.
 	if a.store != nil {
-		_ = a.store.RebuildCatalog(destDir)
-		if a.dataPath != "" {
-			_ = a.store.SyncUserROMs(a.dataPath)
-			_ = a.store.ScanUserLibraryUpdates(destDir, a.dataPath)
+		progress(phaseIndexing, 0)
+		if err := a.rebuildIndex(destDir); err != nil {
+			return fmt.Errorf("index rebuild failed: %w", err)
 		}
 	}
-
-	a.emit("mediaitems:progress", map[string]interface{}{"phase": "done", "percent": 100})
 	return nil
 }
 
@@ -397,7 +428,15 @@ type App struct {
 
 	prefs     Preferences
 	prefsPath string
-	syncMu    sync.Mutex // held for the whole of a catalog sync
+	syncMu    sync.Mutex // held for the whole of a catalog sync or index rebuild
+	activity  catalogActivity
+
+	profiles *profile.Manager      // nil when there is no configuration directory
+	sync     *profilesync.Notifier // nil when profiles are; sends a changed profile on
+
+	playMu      sync.Mutex
+	playing     string // item title of the running game, "" when none
+	playProfile string // slug of the profile it was launched under
 }
 
 // GetActiveInstall returns the item title currently being installed, or "" if idle.
@@ -414,6 +453,7 @@ func NewApp() *App {
 type Settings struct {
 	DataPath           string `json:"dataPath"`
 	AutoRefreshCatalog bool   `json:"autoRefreshCatalog"`
+	ActiveProfile      string `json:"activeProfile"` // slug; the default's when none is chosen
 }
 
 func configDir() (string, error) {
@@ -432,7 +472,11 @@ func configDir() (string, error) {
 // suite program edits the list.
 func (a *App) GetSettings() Settings {
 	a.syncDataPath()
-	return Settings{DataPath: a.dataPath, AutoRefreshCatalog: a.prefs.AutoRefreshCatalog}
+	s := Settings{DataPath: a.dataPath, AutoRefreshCatalog: a.prefs.AutoRefreshCatalog}
+	if p, err := a.activeProfile(); err == nil {
+		s.ActiveProfile = p.Slug
+	}
+	return s
 }
 
 // SetAutoRefreshCatalog records whether PortForge checks for a newer catalog
@@ -485,6 +529,16 @@ func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 	a.prefsPath = preferencesPath()
 	a.prefs = loadPreferences(a.prefsPath)
+
+	// Profiles live beside the storage-unit list, shared with the suite. The
+	// default profile is not created here but on first use, so a config
+	// directory is not written to by a program that was only opened and closed.
+	if m, err := profile.Open(); err == nil {
+		a.profiles = m
+		a.openProfileSync()
+	} else {
+		log.Printf("profiles: %v", err)
+	}
 
 	// In dev mode the project-local mediaitem folder is used; otherwise the
 	// catalog lives in the OS config directory and is never user-configurable.
@@ -857,6 +911,13 @@ func (a *App) InstallVersion(itemTitle string, args map[string]string, specVersi
 	if err := a.writeInstallState(versionDir, spec, exes, resolvedArgs, targetPlatform); err != nil {
 		return err
 	}
+	// Saves the port keeps beside itself go into the profile from here on. An
+	// install from before profiles existed has its data moved in now.
+	if state, err := metadata.ReadInstallState(versionDir); err == nil && state != nil {
+		if p, err := a.activeProfile(); err == nil {
+			a.linkSaves(itemTitle, versionDir, state, p)
+		}
+	}
 	// Snapshot the catalog MediaItem into the user library so we can detect
 	// future updates by comparing the two copies.
 	_ = a.copyToUserLibrary(metadata.PortItemType, itemTitle)
@@ -1027,6 +1088,15 @@ func (a *App) LaunchVersion(itemTitle string, executablePath string) error {
 	if err != nil {
 		return err
 	}
+	// Every game writes to a profile, whether its spec says so or not:
+	// ${profilePath} ports through their flag, the rest through their
+	// userDataPaths, linked into the profile now so a switch since the last
+	// run takes effect. The one it starts under is fixed for the run.
+	launchProfile := ""
+	if p, err := a.activeProfile(); err == nil {
+		launchProfile = p.Slug
+		a.linkSaves(itemTitle, versionDir, state, p)
+	}
 
 	if runtime.GOOS != "windows" {
 		_ = os.Chmod(absPath, 0755)
@@ -1034,9 +1104,21 @@ func (a *App) LaunchVersion(itemTitle string, executablePath string) error {
 
 	cmd := newCommand(absPath, args...)
 	cmd.Dir = filepath.Dir(absPath)
+	// One game at a time: the profile it saves to is fixed for the run, and
+	// two games writing to a profile that switches between them is the case
+	// refuseWhilePlaying exists to rule out.
+	a.playMu.Lock()
+	if a.playing != "" {
+		a.playMu.Unlock()
+		return fmt.Errorf("%s is already running", a.playing)
+	}
 	if err := cmd.Start(); err != nil {
+		a.playMu.Unlock()
 		return err
 	}
+	a.playing = itemTitle
+	a.playProfile = launchProfile
+	a.playMu.Unlock()
 
 	a.emit("game:started", map[string]interface{}{
 		"itemTitle": itemTitle,
@@ -1045,7 +1127,22 @@ func (a *App) LaunchVersion(itemTitle string, executablePath string) error {
 	startTime := time.Now()
 	go func() {
 		cmd.Wait()
+		a.playMu.Lock()
+		a.playing, a.playProfile = "", ""
+		a.playMu.Unlock()
 		playSeconds := int64(time.Since(startTime).Seconds())
+
+		// Data the game created for the first time this session is moved
+		// into the profile before the profile is sent on. The profile the game
+		// was launched under may have changed since — a switch is refused
+		// while it runs, but not after — so the slug captured at launch is
+		// the one to link to and to send on.
+		if launchProfile != "" {
+			if p, err := a.profiles.Get(launchProfile); err == nil {
+				a.linkSaves(itemTitle, versionDir, state, p)
+			}
+		}
+		a.profileChanged(launchProfile, "game ended: "+itemTitle)
 
 		if s, err := metadata.ReadInstallState(versionDir); err == nil && s != nil {
 			s.TotalPlaySeconds += playSeconds
@@ -1074,18 +1171,35 @@ func (a *App) launchArgs(itemTitle string, exe models.ExecutableEntry) ([]string
 				return "", err
 			}
 			if rom, err = a.romProvider(version); err != nil {
-				return "", err
+				return "", fmt.Errorf("%w: %v", errNoROM, err)
 			}
 		}
-		return rom.Resolve(ctx, req)
+		path, err := rom.Resolve(ctx, req)
+		if err != nil {
+			return "", fmt.Errorf("%w: %v", errNoROM, err)
+		}
+		return path, nil
 	})
 	forgeExe := engine.Executable{Path: exe.Path, Title: exe.Title, Args: exe.Args}
-	args, err := forgeExe.LaunchArgs(context.Background(), map[string]engine.Provider{"rom": lazy})
+	providers := map[string]engine.Provider{
+		"rom":     lazy,
+		"profile": a.profileProvider(itemTitle),
+	}
+	args, err := forgeExe.LaunchArgs(context.Background(), providers)
 	if err != nil {
-		return nil, fmt.Errorf("%s needs a ROM to launch: %w", itemTitle, err)
+		// A missing ROM is the one failure the player can fix themselves, so
+		// it is named as such rather than as a generic launch failure.
+		if errors.Is(err, errNoROM) {
+			return nil, fmt.Errorf("%s needs a ROM to launch: %w", itemTitle, err)
+		}
+		return nil, fmt.Errorf("%s cannot be launched: %w", itemTitle, err)
 	}
 	return args, nil
 }
+
+// errNoROM marks a launch-time ROM lookup that found nothing, so launchArgs
+// can tell it from a profile or other provider failing.
+var errNoROM = errors.New("no ROM")
 
 // GetInstallSize returns the total bytes occupied by a version's data directory,
 // which includes the built game plus any source and build artefacts left behind.
@@ -1483,6 +1597,11 @@ func (a *App) writeInstallState(versionDir string, spec *engine.Spec, exes []mod
 		Args:             args,
 		TargetPlatform:   targetPlatform,
 		InstalledAt:      time.Now().UTC().Format(time.RFC3339),
+	}
+	if spec != nil {
+		// Recorded resolved, so linking never re-reads a spec the catalog may
+		// since have changed under an install made from the old one.
+		state.UserDataPaths = userDataPathsOf(spec, targetPlatform, version, args)
 	}
 	if err := metadata.WriteInstallState(versionDir, state); err != nil {
 		return fmt.Errorf("failed to save install state: %w", err)

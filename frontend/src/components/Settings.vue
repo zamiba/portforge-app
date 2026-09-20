@@ -1,14 +1,15 @@
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
-import { EventsOn, EventsOff } from '../../wailsjs/runtime/runtime'
+import { ref, computed, inject, onMounted } from 'vue'
+import { catalogActivityLabel, catalogActivityPercent, catalogActivityRunning } from '../lib/catalog'
 import {
   GetSettings, ValidateMediaItemsPath, SetAutoRefreshCatalog,
   GetCatalogInfo, CheckMediaItemsUpdate, SyncMediaItems,
   GetLibraryStorage, RefreshLibraryIndex,
   GetStorageUnits, AddStorageUnit, RemoveStorageUnit, ReorderStorageUnits, OpenStorageUnit,
+  GetProfiles, CreateProfile, SetActiveProfile, RenameProfile,
 } from '../../wailsjs/go/main/App'
 
-const emit = defineEmits(['saved', 'refreshed'])
+const emit = defineEmits(['saved'])
 
 const props = defineProps({
   /** If true, renders the full-screen first-run setup layout instead of the settings page */
@@ -100,12 +101,98 @@ function unitSpace(u) {
   return `${formatBytes(u.freeBytes)} free of ${formatBytes(u.totalBytes)}`
 }
 
-const refreshing = ref(false)
 const updateAvailable = ref(null)   // null until checked
 const checkingUpdate = ref(false)
-const downloading = ref(false)
-const downloadPhase = ref('')
-const downloadPercent = ref(0)
+
+// ── Catalog activity ────────────────────────────────────────────────────────
+// What the catalog is doing comes from App, which hears about every sync and
+// rebuild — including the startup refresh and a job started before this page
+// was opened — so the buttons here are disabled and the bar shown for all of
+// them, not only the one clicked here. `requested` covers the moment between a
+// click and the backend's first report.
+const catalogActivity = inject('catalogActivity', ref(null))
+const requested = ref(null) // 'sync' | 'index' | null
+const activeKind = computed(() =>
+  catalogActivityRunning(catalogActivity.value) ? catalogActivity.value.kind : requested.value
+)
+const downloading = computed(() => activeKind.value === 'sync')
+const refreshing = computed(() => activeKind.value === 'index')
+const downloadPercent = computed(() => catalogActivityPercent(catalogActivity.value))
+
+// ── Profiles ────────────────────────────────────────────────────────────────
+// Who the saves belong to. Shared with the other MediaItem programs, like the
+// storage list; PortForge only picks which one it writes to. Nobody has to
+// make one — a "portforge" profile stands in until they do.
+const profiles = ref([])
+const profilesError = ref(null)
+const profilesBusy = ref(false)
+const newProfileName = ref('')
+const creatingProfile = ref(false)
+// Slug of the profile whose name is being edited, and the draft.
+const renamingSlug = ref(null)
+const renameDraft = ref('')
+
+const activeProfile = computed(() => profiles.value.find(p => p.active) ?? null)
+
+async function loadProfiles() {
+  try {
+    profiles.value = await GetProfiles()
+    profilesError.value = null
+  } catch (e) {
+    profilesError.value = String(e)
+  }
+}
+
+async function switchProfile(slug) {
+  if (slug === activeProfile.value?.slug) return
+  profilesBusy.value = true
+  try {
+    await SetActiveProfile(slug)
+    await loadProfiles()
+  } catch (e) {
+    profilesError.value = String(e)
+  } finally {
+    profilesBusy.value = false
+  }
+}
+
+async function createProfile() {
+  const name = newProfileName.value.trim()
+  if (!name) return
+  profilesBusy.value = true
+  try {
+    await CreateProfile(name)
+    newProfileName.value = ''
+    creatingProfile.value = false
+    await loadProfiles()
+  } catch (e) {
+    profilesError.value = String(e)
+  } finally {
+    profilesBusy.value = false
+  }
+}
+
+function startRename(p) {
+  renamingSlug.value = p.slug
+  renameDraft.value = p.name
+}
+
+async function finishRename() {
+  const slug = renamingSlug.value
+  const name = renameDraft.value.trim()
+  renamingSlug.value = null
+  if (!slug || !name) return
+  try {
+    await RenameProfile(slug, name)
+    await loadProfiles()
+  } catch (e) {
+    profilesError.value = String(e)
+  }
+}
+
+// The setup screen asks once, in plain terms: a profile with a name of the
+// user's choosing, or one PortForge names after itself. Blank means the latter.
+const setupProfileName = ref('')
 
 // ── Auto-refresh ────────────────────────────────────────────────────────────
 // Whether startup checks GitHub for a newer catalog. Written the moment it is
@@ -130,18 +217,10 @@ async function setAutoRefresh(on) {
 }
 
 onMounted(async () => {
-  await Promise.all([loadCatalog(), loadStorage(), loadUnits(), loadAutoRefresh()])
-
-  EventsOn('mediaitems:progress', ({ phase, percent }) => {
-    downloadPhase.value = phase
-    downloadPercent.value = percent
-    if (phase === 'done') downloading.value = false
-  })
+  const loads = [loadCatalog(), loadStorage(), loadUnits(), loadAutoRefresh()]
+  if (!props.setup) loads.push(loadProfiles())
+  await Promise.all(loads)
 })
-
-// The previous version declared this but never registered it, so every visit to
-// Settings added another listener to the same event.
-onBeforeUnmount(() => EventsOff('mediaitems:progress'))
 
 async function loadCatalog() {
   catalog.value = await GetCatalogInfo().catch(() => catalog.value)
@@ -190,25 +269,28 @@ const catalogLine = computed(() => {
 
 const syncLabel = computed(() => {
   if (!downloading.value) return 'Refresh catalog'
-  if (downloadPhase.value === 'extracting') return 'Extracting…'
-  if (downloadPhase.value === 'copying') return 'Copying…'
-  return `Downloading… ${downloadPercent.value}%`
+  return catalogActivityLabel(catalogActivity.value) || 'Downloading…'
 })
 
+// A sync that fails is reported through the same channel as its progress, so a
+// failure the user did not start — the background refresh — is shown here too.
+const shownError = computed(() =>
+  error.value ?? (catalogActivity.value?.phase === 'failed' ? catalogActivity.value.error : null)
+)
+
+// App reloads the library when the backend reports the sync done; this only
+// refreshes what the page itself shows.
 async function syncCatalog() {
-  downloading.value = true
-  downloadPhase.value = 'downloading'
-  downloadPercent.value = 0
+  requested.value = 'sync'
   error.value = null
   try {
     await SyncMediaItems()
     updateAvailable.value = false
     await Promise.all([loadCatalog(), loadStorage(), loadUnits()])
-    emit('refreshed')
   } catch (e) {
     error.value = String(e)
   } finally {
-    downloading.value = false
+    requested.value = null
   }
 }
 
@@ -225,15 +307,14 @@ async function checkUpdate() {
 }
 
 async function rebuildIndex() {
-  refreshing.value = true
+  requested.value = 'index'
   error.value = null
   try {
     await RefreshLibraryIndex()
-    emit('refreshed')
   } catch (e) {
     error.value = String(e)
   } finally {
-    refreshing.value = false
+    requested.value = null
   }
 }
 
@@ -265,6 +346,11 @@ async function save() {
     if (warning) {
       error.value = warning
       return
+    }
+    // A name means a profile of their own from the start; otherwise the
+    // default appears by itself the first time something needs it.
+    if (setupProfileName.value.trim()) {
+      await CreateProfile(setupProfileName.value.trim())
     }
     emit('saved')
   } catch (e) {
@@ -302,8 +388,26 @@ async function save() {
         <span>Check for a newer catalog whenever PortForge starts</span>
       </label>
 
+      <div class="setup-profile">
+        <label class="setup-profile-label" for="setup-profile-name">Profile</label>
+        <p class="setup-profile-hint">
+          Saves are kept under a profile, so more than one person can play on this
+          machine and a profile can be moved to another. Name yours, or leave this
+          blank and PortForge keeps everything under a profile of its own that you can
+          rename or replace later.
+        </p>
+        <input
+          id="setup-profile-name"
+          v-model="setupProfileName"
+          class="text-input"
+          type="text"
+          placeholder="Your name (optional)"
+          :disabled="saving"
+        />
+      </div>
+
       <p v-if="unitsError" class="error-text">{{ unitsError }}</p>
-      <p v-if="error" class="error-text">{{ error }}</p>
+      <p v-if="shownError" class="error-text">{{ shownError }}</p>
 
       <button class="btn-primary" :disabled="!units.length || saving || downloading" @click="save">
         {{ startLabel }}
@@ -352,6 +456,68 @@ async function save() {
         <input type="checkbox" :checked="autoRefresh" :disabled="catalog.devMode" @change="setAutoRefresh($event.target.checked)" />
         <span>Check for a newer catalog whenever PortForge starts, and fetch it in the background</span>
       </label>
+    </section>
+
+    <header class="section-head">
+      <span class="section-name">Profile</span>
+      <span class="spacer" />
+      <button v-if="!creatingProfile" class="btn-outline" :disabled="profilesBusy" @click="creatingProfile = true">New profile…</button>
+    </header>
+    <p class="section-desc">
+      Saves and settings go to the active profile. Profiles are folders shared with the
+      other MediaItem programs on this machine, so what they record about a person —
+      achievements, what they have watched — sits beside the saves, and a whole profile
+      can be copied or synced to another device however you like. Switching takes effect
+      on the next launch.
+    </p>
+
+    <section class="card profile-list">
+      <form v-if="creatingProfile" class="profile-new" @submit.prevent="createProfile">
+        <input
+          v-model="newProfileName"
+          class="text-input"
+          type="text"
+          placeholder="Profile name"
+          autofocus
+          :disabled="profilesBusy"
+        />
+        <button class="btn-primary btn-small" type="submit" :disabled="profilesBusy || !newProfileName.trim()">Create and use</button>
+        <button class="btn-outline btn-small" type="button" :disabled="profilesBusy" @click="creatingProfile = false; newProfileName = ''">Cancel</button>
+      </form>
+
+      <div v-for="p in profiles" :key="p.slug" class="profile" :class="{ active: p.active }">
+        <button
+          class="profile-pick"
+          :title="p.active ? 'The active profile' : 'Use this profile'"
+          :disabled="profilesBusy || p.active"
+          @click="switchProfile(p.slug)"
+        >
+          <span class="profile-dot" />
+        </button>
+        <div class="profile-body">
+          <form v-if="renamingSlug === p.slug" class="profile-rename" @submit.prevent="finishRename">
+            <input
+              v-model="renameDraft"
+              class="text-input"
+              type="text"
+              autofocus
+              @keydown.esc="renamingSlug = null"
+              @blur="finishRename"
+            />
+          </form>
+          <div v-else class="profile-name">
+            {{ p.name }}
+            <span v-if="p.active" class="unit-badge">active</span>
+            <span v-if="p.createdBy && p.slug === 'portforge'" class="unit-badge" title="Made by PortForge for saves that have no profile of their own">default</span>
+          </div>
+          <div class="profile-slug mono selectable">{{ p.slug }}</div>
+        </div>
+        <div class="unit-actions">
+          <button class="btn-outline btn-small" :disabled="profilesBusy" @click="startRename(p)">Rename</button>
+        </div>
+      </div>
+
+      <p v-if="profilesError" class="error-text">{{ profilesError }}</p>
     </section>
 
     <header class="section-head">
@@ -439,7 +605,7 @@ async function save() {
       </div>
     </section>
 
-    <p v-if="error" class="error-text">{{ error }}</p>
+    <p v-if="shownError" class="error-text">{{ shownError }}</p>
   </div>
 </template>
 
@@ -551,6 +717,123 @@ async function save() {
 .card-toggle {
   flex-basis: 100%;
   margin-top: 4px;
+}
+
+/* ── Profiles ── */
+.setup-profile {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.setup-profile-label {
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+.setup-profile-hint {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--dim);
+  text-wrap: pretty;
+}
+
+.text-input {
+  padding: 7px 11px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--r-control);
+  color: var(--text);
+  font-size: 13.5px;
+  outline: none;
+  min-width: 0;
+
+  &:focus { border-color: var(--line2); }
+  &::placeholder { color: var(--dim2); }
+}
+
+.profile-list {
+  display: flex;
+  flex-direction: column;
+  padding: 6px 20px;
+}
+
+.profile-new {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 0 12px;
+  border-bottom: 1px solid var(--line);
+
+  .text-input { flex: 1; }
+}
+
+.profile {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+
+  &:last-of-type { border-bottom: none; }
+}
+
+.profile-pick {
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  flex-shrink: 0;
+
+  &:not(:disabled):hover .profile-dot { border-color: var(--accent); }
+  &:disabled { cursor: default; }
+}
+
+.profile-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid var(--line2);
+  transition: border-color 120ms ease, background 120ms ease;
+
+  .active & {
+    border-color: var(--accent);
+    background: var(--accent);
+  }
+}
+
+.profile-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.profile-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.profile-slug {
+  font-size: 11.5px;
+  color: var(--dim2);
+}
+
+.profile-rename .text-input {
+  width: 260px;
+  padding: 4px 8px;
 }
 
 .setup-progress {

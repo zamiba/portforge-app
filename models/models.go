@@ -158,9 +158,14 @@ type InstallState struct {
 	ActiveMods       []string          `json:"activeMods"`
 	Args             map[string]string `json:"args,omitempty"`           // arg values the build was made with
 	TargetPlatform   string            `json:"targetPlatform,omitempty"` // platform the build targeted
-	InstalledAt      string            `json:"installedAt"`
-	TotalPlaySeconds int64             `json:"totalPlaySeconds"`
-	LastPlayedAt     string            `json:"lastPlayedAt,omitempty"`
+	// UserDataPaths are the spec's userDataPaths as they were at install time,
+	// interpolated, relative to the port's folder. They name what is linked
+	// into the profile. Absent for installs made before this was recorded,
+	// which read the spec instead.
+	UserDataPaths    []string `json:"userDataPaths,omitempty"`
+	InstalledAt      string   `json:"installedAt"`
+	TotalPlaySeconds int64    `json:"totalPlaySeconds"`
+	LastPlayedAt     string   `json:"lastPlayedAt,omitempty"`
 }
 
 type Mod struct {

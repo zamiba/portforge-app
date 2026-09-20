@@ -3,12 +3,16 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"net"
 	"net/http"
+	"os"
+	"os/signal"
 	"reflect"
 	"strings"
+	"syscall"
 )
 
 // runServer serves the same frontend over plain HTTP instead of putting it in a
@@ -60,7 +64,22 @@ func runServer(app *App, addr string, assets fs.FS) error {
 	fmt.Printf("PortForge is running at http://%s\n", displayAddr(ln.Addr()))
 	fmt.Println("Press Ctrl-C to stop.")
 
-	return http.Serve(ln, localOnly(mux))
+	// Ctrl-C is the only way out of server mode, and the Wails window's
+	// OnShutdown has no counterpart here, so it is done on the signal: a
+	// profile sync still committing gets to finish.
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-stop
+		app.shutdown(context.Background())
+		ln.Close()
+	}()
+
+	err = http.Serve(ln, localOnly(mux))
+	if errors.Is(err, net.ErrClosed) {
+		return nil
+	}
+	return err
 }
 
 // displayAddr turns a listen address into one that can be pasted into a browser.

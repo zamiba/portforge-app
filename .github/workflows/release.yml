@@ -5,6 +5,11 @@ on:
     tags:
       - 'v*'
 
+# Release files carry the version from the tag — portforge-0.3.4-alpha-linux-amd64
+# — so a download is identifiable after it has left the release page.
+env:
+  VERSION: ${{ github.ref_name }}
+
 jobs:
   build-linux:
     runs-on: ubuntu-22.04
@@ -33,12 +38,12 @@ jobs:
         run: wails build -platform linux/amd64
 
       - name: Rename binary
-        run: mv build/bin/portforge build/bin/portforge-linux-amd64
+        run: mv build/bin/portforge "build/bin/portforge-${VERSION#v}-linux-amd64"
 
       - uses: actions/upload-artifact@v4
         with:
           name: portforge-linux
-          path: build/bin/portforge-linux-amd64
+          path: build/bin/portforge-*-linux-amd64
 
   # Separate build for Arch Linux, Fedora 37+, and other distros that ship
   # webkit2gtk 4.1 (libsoup3) instead of the older 4.0 (libsoup2).
@@ -69,12 +74,12 @@ jobs:
         run: wails build -platform linux/amd64 -tags webkit2_41
 
       - name: Rename binary
-        run: mv build/bin/portforge build/bin/portforge-linux-amd64-webkit4_1
+        run: mv build/bin/portforge "build/bin/portforge-${VERSION#v}-linux-amd64-webkit4_1"
 
       - uses: actions/upload-artifact@v4
         with:
           name: portforge-linux-webkit4_1
-          path: build/bin/portforge-linux-amd64-webkit4_1
+          path: build/bin/portforge-*-linux-amd64-webkit4_1
 
   build-windows:
     runs-on: windows-latest
@@ -97,10 +102,14 @@ jobs:
       - name: Build
         run: wails build -platform windows/amd64
 
+      - name: Rename binary
+        shell: bash
+        run: mv build/bin/portforge.exe "build/bin/portforge-${VERSION#v}-windows-amd64.exe"
+
       - uses: actions/upload-artifact@v4
         with:
           name: portforge-windows
-          path: build/bin/portforge.exe
+          path: build/bin/portforge-*-windows-amd64.exe
 
   build-macos:
     runs-on: macos-latest
@@ -124,12 +133,12 @@ jobs:
         run: wails build -platform darwin/universal
 
       - name: Zip app bundle
-        run: cd build/bin && zip -r portforge-macos.zip portforge.app
+        run: cd build/bin && zip -r "portforge-${VERSION#v}-macos-universal.zip" portforge.app
 
       - uses: actions/upload-artifact@v4
         with:
           name: portforge-macos
-          path: build/bin/portforge-macos.zip
+          path: build/bin/portforge-*-macos-universal.zip
 
   release:
     needs: [build-linux, build-linux-webkit4_1, build-windows, build-macos]
@@ -143,7 +152,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            portforge-linux/portforge-linux-amd64
-            portforge-linux-webkit4_1/portforge-linux-amd64-webkit4_1
-            portforge-windows/portforge.exe
-            portforge-macos/portforge-macos.zip
+            portforge-linux/*
+            portforge-linux-webkit4_1/*
+            portforge-windows/*
+            portforge-macos/*
