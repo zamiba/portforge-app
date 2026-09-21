@@ -82,6 +82,7 @@ export namespace main {
 	    name: string;
 	    createdBy?: string;
 	    active: boolean;
+	    picture?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new ProfileInfo(source);
@@ -93,6 +94,7 @@ export namespace main {
 	        this.name = source["name"];
 	        this.createdBy = source["createdBy"];
 	        this.active = source["active"];
+	        this.picture = source["picture"];
 	    }
 	}
 	export class SaveLink {

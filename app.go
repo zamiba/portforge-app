@@ -577,6 +577,23 @@ func (a *App) startup(ctx context.Context) {
 		}
 	}
 
+	// Ports installed before profiles existed, or before their spec declared
+	// userDataPaths, still hold their saves beside the game. Linking them at
+	// startup — the same idempotent step as before a launch — means the
+	// profile holds everything from the first run that knows about it, not
+	// from each game's next launch. A preference naming a profile that is
+	// gone is left for the frontend's first GetProfiles to resolve: the
+	// fallback announces itself with an event, and nobody is listening yet.
+	if a.profiles != nil && a.dataPath != "" {
+		if a.prefs.ActiveProfile == "" {
+			if p, err := a.profiles.Ensure(defaultProfileName, "portforge"); err == nil {
+				a.relinkInstalledPorts(p)
+			}
+		} else if p, err := a.profiles.Get(a.prefs.ActiveProfile); err == nil {
+			a.relinkInstalledPorts(p)
+		}
+	}
+
 	if a.shouldAutoRefreshCatalog() {
 		go a.refreshCatalogIfChanged()
 	}

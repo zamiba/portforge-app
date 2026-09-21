@@ -3,6 +3,7 @@ import { ref, computed, watch, onMounted } from 'vue'
 import { GetROMLibrary, SelectROMFiles, AddROMFiles } from '../../wailsjs/go/main/App'
 import { useRomRequirements } from '../composables/useRomRequirements'
 import RomRequirements from './RomRequirements.vue'
+import ThemeToggle from './ThemeToggle.vue'
 
 const props = defineProps({
   // Bumped by App.vue whenever ROMs are imported, so the view reflects a drop
@@ -83,7 +84,10 @@ async function addFiles(port) {
 <template>
   <div class="rom-library">
     <header class="head">
-      <h1>ROMs</h1>
+      <div class="head-row">
+        <h1>ROMs</h1>
+        <ThemeToggle />
+      </div>
       <p class="sub">
         Every ROM the ports in your catalog can use. Files are identified by
         checksum, so a rename or a different extension makes no difference:
@@ -130,6 +134,13 @@ async function addFiles(port) {
 .rom-library {
   padding: var(--pad-page);
   max-width: 760px;
+}
+
+.head-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
 
 .head h1 {

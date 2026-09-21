@@ -5,8 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net/url"
 	"os"
+	"path/filepath"
 
+	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 	"github.com/zamiba/forge/engine"
 	"github.com/zamiba/go-mediaitems-profiles/profile"
 	"github.com/zamiba/go-mediaitems-profiles/profilesync"
@@ -32,12 +35,27 @@ import (
 // profile the moment it needs one.
 const defaultProfileName = "portforge"
 
-// ProfileInfo is a profile as the Settings page sees it.
+// ProfileInfo is a profile as the frontend sees it.
 type ProfileInfo struct {
 	Slug      string `json:"slug"`
 	Name      string `json:"name"`
 	CreatedBy string `json:"createdBy,omitempty"`
 	Active    bool   `json:"active"`
+	// Picture is a URL the frontend can load, or empty. It carries the file's
+	// modification time so a changed picture is not served from cache.
+	Picture string `json:"picture,omitempty"`
+}
+
+func (a *App) profileInfo(p profile.Profile, active bool) ProfileInfo {
+	info := ProfileInfo{Slug: p.Slug, Name: p.Name, CreatedBy: p.CreatedBy, Active: active}
+	if p.Picture != "" {
+		v := ""
+		if st, err := os.Stat(p.Picture); err == nil {
+			v = fmt.Sprintf("?v=%d", st.ModTime().UnixNano())
+		}
+		info.Picture = profilePictureRoute + url.PathEscape(p.Slug) + v
+	}
+	return info
 }
 
 // activeProfile returns the profile saves go to right now. A preference that
@@ -59,6 +77,10 @@ func (a *App) activeProfile() (profile.Profile, error) {
 		log.Printf("profiles: the active profile %q is gone; using the default", slug)
 		a.prefs.ActiveProfile = ""
 		_ = savePreferences(a.prefsPath, a.prefs)
+		// Said once, since the preference is cleared: the person's saves are
+		// about to go somewhere they did not choose, and a log line is not
+		// where they would look for that.
+		a.emit("profile:missing", map[string]string{"slug": slug, "using": defaultProfileName})
 	}
 	return a.profiles.Ensure(defaultProfileName, "portforge")
 }
@@ -77,7 +99,7 @@ func (a *App) GetProfiles() ([]ProfileInfo, error) {
 	}
 	out := make([]ProfileInfo, 0, len(all))
 	for _, p := range all {
-		out = append(out, ProfileInfo{Slug: p.Slug, Name: p.Name, CreatedBy: p.CreatedBy, Active: p.Slug == active.Slug})
+		out = append(out, a.profileInfo(p, p.Slug == active.Slug))
 	}
 	return out, nil
 }
@@ -93,17 +115,25 @@ func (a *App) CreateProfile(name string) (ProfileInfo, error) {
 		return ProfileInfo{}, err
 	}
 	p, err := a.profiles.Create(name, "portforge")
-	if err != nil {
+	switch {
+	case errors.Is(err, profile.ErrEmptyName):
+		return ProfileInfo{}, errors.New("give the profile a name")
+	case errors.Is(err, profile.ErrExists):
+		// Named by slug, not by what was typed: "Sam" and "sam" are the same
+		// profile, and the folder name is what the two collide on.
+		return ProfileInfo{}, fmt.Errorf("a profile called %s already exists", profile.Slugify(name))
+	case err != nil:
 		return ProfileInfo{}, err
 	}
 	a.prefs.ActiveProfile = p.Slug
 	if err := savePreferences(a.prefsPath, a.prefs); err != nil {
 		return ProfileInfo{}, err
 	}
-	return ProfileInfo{Slug: p.Slug, Name: p.Name, CreatedBy: p.CreatedBy, Active: true}, nil
+	a.relinkInstalledPorts(p)
+	return a.profileInfo(p, true), nil
 }
 
-// SetActiveProfile makes saves go to the named profile from the next launch on.
+// SetActiveProfile makes saves go to the named profile, from this moment.
 // Refused while a game runs: the running game keeps writing to the profile it
 // was started with, and a switch under it would leave the screen saying one
 // thing and the disk doing another.
@@ -114,11 +144,128 @@ func (a *App) SetActiveProfile(slug string) error {
 	if err := a.refuseWhilePlaying("switch profiles"); err != nil {
 		return err
 	}
-	if _, err := a.profiles.Get(slug); err != nil {
+	p, err := a.profiles.Get(slug)
+	if err != nil {
 		return err
 	}
 	a.prefs.ActiveProfile = slug
-	return savePreferences(a.prefsPath, a.prefs)
+	if err := savePreferences(a.prefsPath, a.prefs); err != nil {
+		return err
+	}
+	a.relinkInstalledPorts(p)
+	return nil
+}
+
+// relinkInstalledPorts points every installed port's save links at the given
+// profile. It is what makes a switch take effect at once rather than at the
+// next launch: a port started outside PortForge in between, or its folder
+// opened by hand, would otherwise still be writing to the old profile. The
+// launch-time linking stays, for a preference edited behind PortForge's back.
+func (a *App) relinkInstalledPorts(p profile.Profile) {
+	if a.dataPath == "" {
+		return
+	}
+	entries, err := os.ReadDir(filepath.Join(a.dataPath, metadata.PortItemType))
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		versionDir := filepath.Join(a.dataPath, metadata.PortItemType, e.Name())
+		state, err := metadata.ReadInstallState(versionDir)
+		if err != nil || state == nil || !state.Installed {
+			continue
+		}
+		a.linkSaves(e.Name(), versionDir, state, p)
+	}
+}
+
+// DeleteProfile removes a profile from this device — the folder and everything
+// in it, for every program that used it. The active one cannot be deleted:
+// switch away first, so there is never a moment with saves going nowhere.
+// The default is an ordinary profile here; if it is deleted while not active
+// it simply reappears, empty, the next time nothing else is chosen.
+func (a *App) DeleteProfile(slug string) error {
+	if a.profiles == nil {
+		return errors.New("profiles are unavailable: no configuration directory")
+	}
+	active, err := a.activeProfile()
+	if err != nil {
+		return err
+	}
+	if slug == active.Slug {
+		return fmt.Errorf("%s is in use; switch to another profile first", active.Name)
+	}
+	if err := a.profiles.Delete(slug); errors.Is(err, profile.ErrNotFound) {
+		return fmt.Errorf("there is no profile called %s any more", slug)
+	} else if err != nil {
+		return err
+	}
+	return nil
+}
+
+// profilePictureRoute is where the asset handler serves a profile's picture
+// from; see assets.go.
+const profilePictureRoute = "/profiles/picture/"
+
+// SetProfilePicture asks for an image and makes it the profile's picture. The
+// module does the cropping and scaling, so the file handed over is the one
+// the person picked; what lands in the profile folder is its 256px square.
+func (a *App) SetProfilePicture(slug string) error {
+	if a.profiles == nil {
+		return errors.New("profiles are unavailable: no configuration directory")
+	}
+	if err := a.requireNativeDialogs("Choosing a picture"); err != nil {
+		return err
+	}
+	path, err := wailsruntime.OpenFileDialog(a.ctx, wailsruntime.OpenDialogOptions{
+		Title: "Choose a profile picture",
+		Filters: []wailsruntime.FileFilter{
+			{DisplayName: "Images", Pattern: "*.png;*.jpg;*.jpeg;*.gif"},
+		},
+	})
+	if err != nil {
+		return err
+	}
+	if path == "" {
+		return nil // dismissed
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	if err := a.profiles.SetPicture(slug, f); err != nil {
+		if errors.Is(err, profile.ErrBadPicture) {
+			return errors.New("that file is not a PNG, JPEG or GIF image")
+		}
+		return err
+	}
+	return nil
+}
+
+// RemoveProfilePicture takes the picture away; the profile shows its initial again.
+func (a *App) RemoveProfilePicture(slug string) error {
+	if a.profiles == nil {
+		return errors.New("profiles are unavailable: no configuration directory")
+	}
+	return a.profiles.RemovePicture(slug)
+}
+
+// profilePicture returns the path of a profile's picture file, for the asset
+// handler. Empty when there is none. The module names the file; nothing here
+// builds a path inside a profile.
+func (a *App) profilePicture(slug string) string {
+	if a.profiles == nil {
+		return ""
+	}
+	p, err := a.profiles.Get(slug)
+	if err != nil {
+		return ""
+	}
+	return p.Picture
 }
 
 // RenameProfile changes a profile's display name. The folder — and so every

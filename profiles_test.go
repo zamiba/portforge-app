@@ -1,6 +1,9 @@
 package main
 
 import (
+	"bytes"
+	"image"
+	"image/png"
 	"os"
 	"path/filepath"
 	"strings"
@@ -87,9 +90,15 @@ func TestCreatingAProfileSwitchesToIt(t *testing.T) {
 }
 
 // A preference pointing at a profile whose folder is gone must not break every
-// launch; it falls back to the default and is forgotten.
+// launch; it falls back to the default and is forgotten — and the person is
+// told once, since from here on their saves go somewhere they did not pick.
 func TestAMissingActiveProfileFallsBackToTheDefault(t *testing.T) {
-	app := &App{}
+	var told []interface{}
+	app := &App{events: func(name string, data interface{}) {
+		if name == "profile:missing" {
+			told = append(told, data)
+		}
+	}}
 	withProfiles(t, app)
 	if _, err := app.CreateProfile("Sam"); err != nil {
 		t.Fatal(err)
@@ -106,6 +115,30 @@ func TestAMissingActiveProfileFallsBackToTheDefault(t *testing.T) {
 	}
 	if loadPreferences(app.prefsPath).ActiveProfile != "" {
 		t.Error("the stale preference should have been cleared")
+	}
+	if _, err := app.activeProfile(); err != nil {
+		t.Fatal(err)
+	}
+	if len(told) != 1 {
+		t.Fatalf("profile:missing emitted %d times, want once", len(told))
+	}
+	if got := told[0].(map[string]string); got["slug"] != "sam" || got["using"] != "portforge" {
+		t.Errorf("profile:missing = %v", got)
+	}
+}
+
+// The modal shows these lines as they are, so they have to read as sentences.
+func TestCreateProfileErrorsReadAsSentences(t *testing.T) {
+	app := &App{}
+	withProfiles(t, app)
+	if _, err := app.CreateProfile("Sam"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.CreateProfile("  sam "); err == nil || err.Error() != "a profile called sam already exists" {
+		t.Errorf("duplicate: %v", err)
+	}
+	if _, err := app.CreateProfile("  "); err == nil || err.Error() != "give the profile a name" {
+		t.Errorf("empty: %v", err)
 	}
 }
 
@@ -159,5 +192,90 @@ func TestLaunchRefusesAQualifiedProfilePath(t *testing.T) {
 	}
 	if _, statErr := os.Stat(filepath.Join(versionDir, "install", "argv")); statErr == nil {
 		t.Error("the executable was started anyway")
+	}
+}
+
+// Deleting is the module's; PortForge only decides which one may go. The
+// active profile may not, and the default is not special once it is not
+// active — it comes back on its own when next needed.
+func TestDeleteProfileRefusesTheActiveOne(t *testing.T) {
+	app := &App{events: func(string, interface{}) {}} // profile:missing, below
+	withProfiles(t, app)
+	if _, err := app.GetProfiles(); err != nil { // brings the default into being
+		t.Fatal(err)
+	}
+	if _, err := app.CreateProfile("Sam"); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.DeleteProfile("sam"); err == nil || !strings.Contains(err.Error(), "in use") {
+		t.Errorf("deleting the active profile: %v", err)
+	}
+	if err := app.DeleteProfile("portforge"); err != nil {
+		t.Fatalf("deleting the idle default: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(app.profiles.Dir(), "portforge")); !os.IsNotExist(err) {
+		t.Error("the folder should be gone")
+	}
+	if err := app.DeleteProfile("portforge"); err == nil {
+		t.Error("deleting a profile that is not there should fail")
+	}
+	if err := app.SetActiveProfile("portforge"); err == nil {
+		t.Error("a deleted profile cannot be switched to")
+	}
+	// Idle default deleted, Sam deleted from the side: the next use makes a
+	// fresh default rather than failing.
+	if err := os.RemoveAll(filepath.Join(app.profiles.Dir(), "sam")); err != nil {
+		t.Fatal(err)
+	}
+	list, err := app.GetProfiles()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 || list[0].Slug != "portforge" || !list[0].Active {
+		t.Errorf("GetProfiles = %+v", list)
+	}
+}
+
+// The picture is the module's file; PortForge turns its presence into a URL
+// that changes when the file does.
+func TestProfilePictureBecomesAVersionedURL(t *testing.T) {
+	app := &App{}
+	withProfiles(t, app)
+	info, err := app.CreateProfile("Sam")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Picture != "" {
+		t.Errorf("a new profile has no picture, got %q", info.Picture)
+	}
+	img := image.NewRGBA(image.Rect(0, 0, 4, 2))
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.profiles.SetPicture("sam", &buf); err != nil {
+		t.Fatal(err)
+	}
+	list, err := app.GetProfiles()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sam ProfileInfo
+	for _, p := range list {
+		if p.Slug == "sam" {
+			sam = p
+		}
+	}
+	if !strings.HasPrefix(sam.Picture, profilePictureRoute+"sam?v=") {
+		t.Errorf("picture URL = %q", sam.Picture)
+	}
+	if app.profilePicture("sam") == "" || app.profilePicture("portforge") != "" || app.profilePicture("nobody") != "" {
+		t.Error("profilePicture should answer only for a profile with a picture")
+	}
+	if err := app.RemoveProfilePicture("sam"); err != nil {
+		t.Fatal(err)
+	}
+	if app.profilePicture("sam") != "" {
+		t.Error("the picture should be gone")
 	}
 }

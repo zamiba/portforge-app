@@ -1,12 +1,16 @@
 <script setup>
 import { ref, computed, inject, onMounted } from 'vue'
 import { catalogActivityLabel, catalogActivityPercent, catalogActivityRunning } from '../lib/catalog'
+import { slugify } from '../lib/slug'
+import { useProfiles } from '../composables/useProfiles'
+import ProfilePicture from './ProfilePicture.vue'
+import ThemeToggle from './ThemeToggle.vue'
 import {
   GetSettings, ValidateMediaItemsPath, SetAutoRefreshCatalog,
   GetCatalogInfo, CheckMediaItemsUpdate, SyncMediaItems,
   GetLibraryStorage, RefreshLibraryIndex,
   GetStorageUnits, AddStorageUnit, RemoveStorageUnit, ReorderStorageUnits, OpenStorageUnit,
-  GetProfiles, CreateProfile, SetActiveProfile, RenameProfile,
+  CreateProfile,
 } from '../../wailsjs/go/main/App'
 
 const emit = defineEmits(['saved'])
@@ -121,78 +125,17 @@ const downloadPercent = computed(() => catalogActivityPercent(catalogActivity.va
 
 // ── Profiles ────────────────────────────────────────────────────────────────
 // Who the saves belong to. Shared with the other MediaItem programs, like the
-// storage list; PortForge only picks which one it writes to. Nobody has to
-// make one — a "portforge" profile stands in until they do.
-const profiles = ref([])
-const profilesError = ref(null)
-const profilesBusy = ref(false)
-const newProfileName = ref('')
-const creatingProfile = ref(false)
-// Slug of the profile whose name is being edited, and the draft.
-const renamingSlug = ref(null)
-const renameDraft = ref('')
+// storage list; PortForge only picks which one it writes to. This page only
+// summarises the active one — every action is in the modal the button opens,
+// the same one the sidebar row opens.
+const { active: activeProfile, open: openProfiles } = useProfiles()
 
-const activeProfile = computed(() => profiles.value.find(p => p.active) ?? null)
-
-async function loadProfiles() {
-  try {
-    profiles.value = await GetProfiles()
-    profilesError.value = null
-  } catch (e) {
-    profilesError.value = String(e)
-  }
-}
-
-async function switchProfile(slug) {
-  if (slug === activeProfile.value?.slug) return
-  profilesBusy.value = true
-  try {
-    await SetActiveProfile(slug)
-    await loadProfiles()
-  } catch (e) {
-    profilesError.value = String(e)
-  } finally {
-    profilesBusy.value = false
-  }
-}
-
-async function createProfile() {
-  const name = newProfileName.value.trim()
-  if (!name) return
-  profilesBusy.value = true
-  try {
-    await CreateProfile(name)
-    newProfileName.value = ''
-    creatingProfile.value = false
-    await loadProfiles()
-  } catch (e) {
-    profilesError.value = String(e)
-  } finally {
-    profilesBusy.value = false
-  }
-}
-
-function startRename(p) {
-  renamingSlug.value = p.slug
-  renameDraft.value = p.name
-}
-
-async function finishRename() {
-  const slug = renamingSlug.value
-  const name = renameDraft.value.trim()
-  renamingSlug.value = null
-  if (!slug || !name) return
-  try {
-    await RenameProfile(slug, name)
-    await loadProfiles()
-  } catch (e) {
-    profilesError.value = String(e)
-  }
-}
-
-// The setup screen asks once, in plain terms: a profile with a name of the
-// user's choosing, or one PortForge names after itself. Blank means the latter.
+// The setup screen asks once, as a question with two answers: a profile with
+// a name of the user's choosing, or one PortForge names after itself. The
+// first card with nothing typed means the second — no error, no blocking.
+const setupProfileChoice = ref('own') // 'own' | 'made'
 const setupProfileName = ref('')
+const setupProfileSlug = computed(() => slugify(setupProfileName.value) || 'sam')
 
 // ── Auto-refresh ────────────────────────────────────────────────────────────
 // Whether startup checks GitHub for a newer catalog. Written the moment it is
@@ -217,9 +160,7 @@ async function setAutoRefresh(on) {
 }
 
 onMounted(async () => {
-  const loads = [loadCatalog(), loadStorage(), loadUnits(), loadAutoRefresh()]
-  if (!props.setup) loads.push(loadProfiles())
-  await Promise.all(loads)
+  await Promise.all([loadCatalog(), loadStorage(), loadUnits(), loadAutoRefresh()])
 })
 
 async function loadCatalog() {
@@ -326,7 +267,7 @@ const catalogReady = computed(() => catalog.value.devMode || !!catalog.value.sha
 const startLabel = computed(() => {
   if (downloading.value) return syncLabel.value
   if (saving.value) return 'Starting…'
-  return catalogReady.value ? 'Get Started' : 'Download the catalog and get started'
+  return catalogReady.value ? 'Open my library' : 'Download the catalog and open my library'
 })
 
 // save finishes first-run setup. There is no path to persist any more — the
@@ -349,9 +290,8 @@ async function save() {
     }
     // A name means a profile of their own from the start; otherwise the
     // default appears by itself the first time something needs it.
-    if (setupProfileName.value.trim()) {
-      await CreateProfile(setupProfileName.value.trim())
-    }
+    const name = setupProfileChoice.value === 'own' ? setupProfileName.value.trim() : ''
+    if (name) await CreateProfile(name)
     emit('saved')
   } catch (e) {
     error.value = String(e)
@@ -389,21 +329,59 @@ async function save() {
       </label>
 
       <div class="setup-profile">
-        <label class="setup-profile-label" for="setup-profile-name">Profile</label>
+        <h2 class="setup-profile-label">Whose saves are these?</h2>
         <p class="setup-profile-hint">
-          Saves are kept under a profile, so more than one person can play on this
-          machine and a profile can be moved to another. Name yours, or leave this
-          blank and PortForge keeps everything under a profile of its own that you can
-          rename or replace later.
+          Saves go in a profile folder that every MediaItem program on this machine
+          shares. You can add more profiles later.
         </p>
-        <input
-          id="setup-profile-name"
-          v-model="setupProfileName"
-          class="text-input"
-          type="text"
-          placeholder="Your name (optional)"
-          :disabled="saving"
-        />
+
+        <div class="choice-cards" role="radiogroup" aria-label="Profile">
+          <div
+            class="choice-card"
+            :class="{ selected: setupProfileChoice === 'own' }"
+            role="radio"
+            :aria-checked="setupProfileChoice === 'own'"
+            tabindex="0"
+            @click="setupProfileChoice = 'own'"
+            @keydown.enter.space.prevent="setupProfileChoice = 'own'"
+          >
+            <span class="choice-dot" aria-hidden="true" />
+            <div class="choice-body">
+              <div class="choice-title">A profile of my own</div>
+              <div class="choice-text">Name it and PortForge makes the folder.</div>
+              <div v-if="setupProfileChoice === 'own'" class="choice-field">
+                <input
+                  v-model="setupProfileName"
+                  class="text-input choice-input"
+                  type="text"
+                  placeholder="Sam"
+                  aria-label="Profile name"
+                  :disabled="saving"
+                  @click.stop
+                  @keydown.stop
+                />
+                <div class="choice-slug mono">{{ setupProfileSlug }}</div>
+              </div>
+            </div>
+          </div>
+
+          <div
+            class="choice-card"
+            :class="{ selected: setupProfileChoice === 'made' }"
+            role="radio"
+            :aria-checked="setupProfileChoice === 'made'"
+            tabindex="0"
+            @click="setupProfileChoice = 'made'"
+            @keydown.enter.space.prevent="setupProfileChoice = 'made'"
+          >
+            <span class="choice-dot" aria-hidden="true" />
+            <div class="choice-body">
+              <div class="choice-title">Let PortForge make one</div>
+              <div class="choice-text">A profile named portforge. It works the same, and you can rename it whenever.</div>
+              <div v-if="setupProfileChoice === 'made'" class="choice-slug choice-slug-made mono">portforge</div>
+            </div>
+          </div>
+        </div>
       </div>
 
       <p v-if="unitsError" class="error-text">{{ unitsError }}</p>
@@ -420,7 +398,26 @@ async function save() {
 
   <!-- ── Settings ────────────────────────────────────────────────────────── -->
   <div v-else class="settings">
-    <h1 class="page-title settings-title">Settings</h1>
+    <header class="settings-head">
+      <h1 class="page-title">Settings</h1>
+      <span class="spacer" />
+      <ThemeToggle />
+    </header>
+
+    <section v-if="activeProfile" class="card profile-card">
+      <ProfilePicture :profile="activeProfile" :size="38" />
+      <div class="card-text">
+        <span class="profile-card-title">
+          <span class="card-name">Profile · {{ activeProfile.name }}</span>
+          <span class="profile-card-slug mono selectable">{{ activeProfile.slug }}</span>
+        </span>
+        <span class="card-meta">
+          Saves go to the active profile, shared with the other MediaItem programs on
+          this machine.
+        </span>
+      </div>
+      <button class="btn-outline" @click="openProfiles">Manage profiles…</button>
+    </section>
 
     <section class="card catalog-card">
       <div class="card-text">
@@ -456,68 +453,6 @@ async function save() {
         <input type="checkbox" :checked="autoRefresh" :disabled="catalog.devMode" @change="setAutoRefresh($event.target.checked)" />
         <span>Check for a newer catalog whenever PortForge starts, and fetch it in the background</span>
       </label>
-    </section>
-
-    <header class="section-head">
-      <span class="section-name">Profile</span>
-      <span class="spacer" />
-      <button v-if="!creatingProfile" class="btn-outline" :disabled="profilesBusy" @click="creatingProfile = true">New profile…</button>
-    </header>
-    <p class="section-desc">
-      Saves and settings go to the active profile. Profiles are folders shared with the
-      other MediaItem programs on this machine, so what they record about a person —
-      achievements, what they have watched — sits beside the saves, and a whole profile
-      can be copied or synced to another device however you like. Switching takes effect
-      on the next launch.
-    </p>
-
-    <section class="card profile-list">
-      <form v-if="creatingProfile" class="profile-new" @submit.prevent="createProfile">
-        <input
-          v-model="newProfileName"
-          class="text-input"
-          type="text"
-          placeholder="Profile name"
-          autofocus
-          :disabled="profilesBusy"
-        />
-        <button class="btn-primary btn-small" type="submit" :disabled="profilesBusy || !newProfileName.trim()">Create and use</button>
-        <button class="btn-outline btn-small" type="button" :disabled="profilesBusy" @click="creatingProfile = false; newProfileName = ''">Cancel</button>
-      </form>
-
-      <div v-for="p in profiles" :key="p.slug" class="profile" :class="{ active: p.active }">
-        <button
-          class="profile-pick"
-          :title="p.active ? 'The active profile' : 'Use this profile'"
-          :disabled="profilesBusy || p.active"
-          @click="switchProfile(p.slug)"
-        >
-          <span class="profile-dot" />
-        </button>
-        <div class="profile-body">
-          <form v-if="renamingSlug === p.slug" class="profile-rename" @submit.prevent="finishRename">
-            <input
-              v-model="renameDraft"
-              class="text-input"
-              type="text"
-              autofocus
-              @keydown.esc="renamingSlug = null"
-              @blur="finishRename"
-            />
-          </form>
-          <div v-else class="profile-name">
-            {{ p.name }}
-            <span v-if="p.active" class="unit-badge">active</span>
-            <span v-if="p.createdBy && p.slug === 'portforge'" class="unit-badge" title="Made by PortForge for saves that have no profile of their own">default</span>
-          </div>
-          <div class="profile-slug mono selectable">{{ p.slug }}</div>
-        </div>
-        <div class="unit-actions">
-          <button class="btn-outline btn-small" :disabled="profilesBusy" @click="startRename(p)">Rename</button>
-        </div>
-      </div>
-
-      <p v-if="profilesError" class="error-text">{{ profilesError }}</p>
     </section>
 
     <header class="section-head">
@@ -616,7 +551,10 @@ async function save() {
   padding: 18px var(--pad-page) 44px;
 }
 
-.settings-title {
+.settings-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
   margin-bottom: 26px;
 }
 
@@ -720,6 +658,29 @@ async function save() {
 }
 
 /* ── Profiles ── */
+.profile-card {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.profile-card-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.profile-card-slug {
+  font-size: 11.5px;
+  color: var(--dim2);
+}
+
+.profile-card .card-meta { text-wrap: pretty; }
+.profile-card .btn-outline { white-space: nowrap; }
+
+/* First run: the question and its two answers. */
 .setup-profile {
   display: flex;
   flex-direction: column;
@@ -728,20 +689,96 @@ async function save() {
 }
 
 .setup-profile-label {
-  font-size: 12px;
+  margin: 0;
+  font-size: 14px;
   font-weight: 500;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--dim);
+  color: var(--text);
 }
 
 .setup-profile-hint {
   margin: 0;
   font-size: 12.5px;
-  line-height: 1.5;
-  color: var(--dim);
+  line-height: 1.55;
+  color: var(--dim2);
   text-wrap: pretty;
 }
+
+.choice-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.choice-card {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 14px 16px;
+  border: 1px solid var(--line2);
+  border-radius: var(--r-card);
+  background: var(--panel);
+  cursor: pointer;
+  outline: none;
+
+  &:focus-visible { border-color: var(--dim2); }
+
+  &.selected {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+    .choice-dot { border-color: var(--accent); }
+    .choice-dot::after { background: var(--accent); }
+  }
+}
+
+.choice-dot {
+  flex: 0 0 auto;
+  width: 15px;
+  height: 15px;
+  margin-top: 2px;
+  border-radius: 50%;
+  border: 1.5px solid var(--line2);
+  display: grid;
+  place-items: center;
+
+  &::after {
+    content: "";
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: transparent;
+  }
+}
+
+.choice-body { flex: 1; min-width: 0; }
+
+.choice-title {
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.choice-text {
+  margin-top: 3px;
+  font-size: 12.5px;
+  color: var(--dim);
+}
+
+.choice-field { margin-top: 12px; }
+
+.choice-input {
+  width: 100%;
+  padding: 9px 11px;
+  border-color: var(--line2);
+}
+
+.choice-slug {
+  margin-top: 7px;
+  font-size: 11.5px;
+  color: var(--dim2);
+}
+
+.choice-slug-made { margin-top: 10px; }
 
 .text-input {
   padding: 7px 11px;
@@ -755,85 +792,6 @@ async function save() {
 
   &:focus { border-color: var(--line2); }
   &::placeholder { color: var(--dim2); }
-}
-
-.profile-list {
-  display: flex;
-  flex-direction: column;
-  padding: 6px 20px;
-}
-
-.profile-new {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 0 12px;
-  border-bottom: 1px solid var(--line);
-
-  .text-input { flex: 1; }
-}
-
-.profile {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 12px 0;
-  border-bottom: 1px solid var(--line);
-
-  &:last-of-type { border-bottom: none; }
-}
-
-.profile-pick {
-  width: 22px;
-  height: 22px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-  flex-shrink: 0;
-
-  &:not(:disabled):hover .profile-dot { border-color: var(--accent); }
-  &:disabled { cursor: default; }
-}
-
-.profile-dot {
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  border: 2px solid var(--line2);
-  transition: border-color 120ms ease, background 120ms ease;
-
-  .active & {
-    border-color: var(--accent);
-    background: var(--accent);
-  }
-}
-
-.profile-body {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.profile-name {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--text);
-}
-
-.profile-slug {
-  font-size: 11.5px;
-  color: var(--dim2);
-}
-
-.profile-rename .text-input {
-  width: 260px;
-  padding: 4px 8px;
 }
 
 .setup-progress {

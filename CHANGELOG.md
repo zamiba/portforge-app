@@ -23,9 +23,16 @@ storage-unit list that every MediaItem program on the machine reads, so achievem
 watched episodes recorded by other programs sit next to the saves, and one folder can be
 copied or synced to another device by whatever means the user prefers — PortForge itself
 does not sync, snapshot or merge them. Nobody has to create one: first-run setup asks
-for a name and a blank answer means a `portforge` profile made behind the scenes, an
-ordinary profile that can be renamed or replaced. Settings lists profiles, creates and
-renames them and switches between them; a switch is refused while a game runs. A spec can
+whose saves these are — a profile of your own, or one PortForge makes, named `portforge`,
+which is an ordinary profile that can be renamed or replaced. The sidebar's last row says
+who is playing and opens the profile modal, where profiles are switched, renamed and
+created, given a picture and deleted; Settings summarises the active one and opens the
+same modal. A switch takes effect at once — every installed port's save links are
+re-pointed there and then — and is refused while a game runs. Deleting is a two-step act
+with a warning worded for the whole suite, since the folder holds more than game saves;
+the active profile cannot be deleted. A picture is cropped square and scaled by the
+profiles module and kept inside the profile folder, so the other programs show the same
+one. A spec can
 now put `${profilePath}` in a `defineExecutable` step's `args`, next to the port's own
 flag — `"args": ["--save-dir", "${profilePath}"]` — and PortForge resolves it to the
 active profile's folder for that port every time the game starts, creating it on first
@@ -39,11 +46,18 @@ When a session ends
 PortForge tells the profiles module the profile changed, and the module sends it wherever
 `MediaItem/profile-sync.json` says — a git commit if the profile is a repository, with a
 push if a remote is named; rclone or Syncthing if configured; nothing otherwise — in the
-background, with the outcome shown briefly and failures logged. PortForge itself never
-runs a sync tool. Built on the new `go-mediaitems-profiles` module (v0.1.0) and
-`go-mediaitems` v0.2.0.
+background. A success is shown briefly; a failure stays in the notice bar until
+dismissed, since it is the only sign that the saves did not leave the machine, and says
+so: the saves themselves are safe. A game whose save folder could not be linked into the
+profile — because something was already there — says so on its page, with a button that
+reveals the folder. If the active profile's folder has vanished, PortForge falls back to
+`portforge` and says so until dismissed. PortForge itself never runs a sync tool. Built on
+the new `go-mediaitems-profiles` module (v0.2.0) and `go-mediaitems` v0.2.0.
 
 ### Changed
+
+**The dark/light toggle has moved from the sidebar to each page's top bar.** The
+sidebar's bottom slot now belongs to the profile row.
 
 **Release files are named after their version.** A download is
 `portforge-0.3.4-alpha-linux-amd64` rather than `portforge-linux-amd64`, so two builds

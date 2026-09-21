@@ -132,9 +132,9 @@ func TestASessionsNewSavesAreMovedInWhenItEnds(t *testing.T) {
 	linksTo(t, filepath.Join(versionDir, "install", "saves"), filepath.Join(inProfile, "install", "saves"))
 }
 
-// Switching profiles re-points the links at the next launch: the old
-// profile keeps its saves, the new one starts empty.
-func TestLaunchRepointsLinksAtTheActiveProfile(t *testing.T) {
+// Switching profiles re-points every installed port's links there and then:
+// the old profile keeps its saves, the new one starts empty.
+func TestSwitchingProfilesRepointsLinksAtOnce(t *testing.T) {
 	app, versionDir := linkTestApp(t, linkSpec)
 	writeAt(t, filepath.Join(versionDir, "install", "saves", "slot1.sav"), "sam's save")
 	if err := app.InstallVersion("Link Port", map[string]string{}, "1.0", ""); err != nil {
@@ -145,6 +145,36 @@ func TestLaunchRepointsLinksAtTheActiveProfile(t *testing.T) {
 		t.Fatal(err)
 	}
 	kidDir := profileItemDir(t, app, "kid")
+
+	linksTo(t, filepath.Join(versionDir, "install", "saves"), filepath.Join(kidDir, "install", "saves"))
+	fileIs(t, filepath.Join(samDir, "install", "saves", "slot1.sav"), "sam's save")
+	if entries, _ := os.ReadDir(filepath.Join(kidDir, "install", "saves")); len(entries) != 0 {
+		t.Error("the new profile should start with an empty saves folder")
+	}
+
+	if err := app.SetActiveProfile("portforge"); err != nil {
+		t.Fatal(err)
+	}
+	linksTo(t, filepath.Join(versionDir, "install", "saves"), filepath.Join(samDir, "install", "saves"))
+	fileIs(t, filepath.Join(versionDir, "install", "saves", "slot1.sav"), "sam's save")
+}
+
+// A preference changed behind PortForge's back — the file edited, or copied
+// from another machine — is caught up with at launch, so a game never runs
+// against links that point at a profile other than the active one.
+func TestLaunchRepointsLinksAtTheActiveProfile(t *testing.T) {
+	app, versionDir := linkTestApp(t, linkSpec)
+	writeAt(t, filepath.Join(versionDir, "install", "saves", "slot1.sav"), "sam's save")
+	if err := app.InstallVersion("Link Port", map[string]string{}, "1.0", ""); err != nil {
+		t.Fatal(err)
+	}
+	samDir := profileItemDir(t, app, "portforge")
+	if _, err := app.profiles.Create("Kid", "someone else"); err != nil {
+		t.Fatal(err)
+	}
+	kidDir := profileItemDir(t, app, "kid")
+	app.prefs.ActiveProfile = "kid"
+	linksTo(t, filepath.Join(versionDir, "install", "saves"), filepath.Join(samDir, "install", "saves"))
 
 	exe := filepath.Join(versionDir, "install", "game")
 	writeAt(t, exe, "#!/bin/sh\nexit 0\n")

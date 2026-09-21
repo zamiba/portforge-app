@@ -4,7 +4,6 @@ import (
 	"embed"
 	"flag"
 	"fmt"
-	"net/http"
 	"os"
 	"runtime"
 
@@ -45,11 +44,8 @@ func main() {
 		Width:  1920,
 		Height: 1080,
 		AssetServer: &assetserver.Options{
-			Assets: assets,
-			Handler: http.StripPrefix("/mediaitems/", artworkHandler(
-				func() string { return app.metadataPath },
-				thumbCacheDir(),
-			)),
+			Assets:  assets,
+			Handler: assetHandler(app),
 		},
 		BackgroundColour:         &options.RGBA{R: 27, G: 38, B: 54, A: 1},
 		OnStartup:                app.startup,

@@ -1,14 +1,17 @@
 <script setup>
-import { ref, computed, inject, watch, nextTick } from 'vue'
+import { ref, computed, inject, watch, nextTick, onUnmounted } from 'vue'
+import { EventsOn } from '../../wailsjs/runtime/runtime'
 import { marked } from 'marked'
 import {
   GetROMStatus, GetInstallState, GetInstallPrompts,
   GetSpecVersions, GetInstallSize, LaunchVersion, CleanBuildDir, UninstallVersion,
   GetItemUpdate, UpdateMediaItem, SelectROMFiles, AddROMFiles,
+  GetSaveLinks, RevealSaves,
 } from '../../wailsjs/go/main/App'
 import { artworkUrl, ART_WIDTH } from '../lib/artwork'
 import { useRomRequirements } from '../composables/useRomRequirements'
 import RomRequirements from './RomRequirements.vue'
+import ThemeToggle from './ThemeToggle.vue'
 
 const props = defineProps({
   game: { type: Object, required: true },
@@ -265,6 +268,43 @@ watch(activeInstall, (cur, prev) => {
   if (prev?.itemTitle === props.game._itemTitle && cur === null) loadState()
 })
 
+// ── Saves ───────────────────────────────────────────────────────────────────
+// Where this port's own save folders are going. Nothing is shown when they go
+// to the profile — the sidebar already says who is playing. Only a failure to
+// link them earns a card, because then the saves are staying with the game.
+const saveLinks = ref(null) // SaveLinkStatus, or null when not installed
+
+async function loadSaveLinks() {
+  try {
+    const status = await GetSaveLinks(props.game._itemTitle)
+    saveLinks.value = status?.links?.length ? status : null
+  } catch {
+    saveLinks.value = null
+  }
+}
+
+const saveLinkFailure = computed(() => {
+  if (!saveLinks.value?.failed) return null
+  const links = saveLinks.value.links
+  const conflict = links.some(l => l.state === 'conflict')
+  const reason = links.find(l => l.state !== 'linked' && l.state !== 'pending' && l.reason)?.reason
+  return {
+    profile: saveLinks.value.profile,
+    text: conflict
+      ? 'This port keeps its saves in its own folder and PortForge could not link that folder into the profile — something is already there. The game still runs.'
+      : `This port keeps its saves in its own folder and PortForge could not link that folder into the profile${reason ? `: ${reason}` : ''}. The game still runs.`,
+  }
+})
+
+// Links are made or re-pointed at install, launch and session end, so the
+// card is only right if it is re-read after each of those. The backend emits
+// game:ended after it has linked, so listening for it is enough.
+watch(installState, loadSaveLinks)
+const stopGameEnded = EventsOn('game:ended', ({ itemTitle }) => {
+  if (itemTitle === props.game._itemTitle) loadSaveLinks()
+})
+onUnmounted(stopGameEnded)
+
 // ── Build output ────────────────────────────────────────────────────────────
 // Collapsed by default: a successful build's output is noise. A failure is the
 // one moment it is the first thing worth reading, so open it automatically.
@@ -436,6 +476,8 @@ function formatDate(iso) {
         <span class="chevron-left" aria-hidden="true" />
         Library
       </button>
+      <span class="back-spacer" />
+      <ThemeToggle />
     </div>
 
     <div class="detail-scroll">
@@ -738,6 +780,15 @@ function formatDate(iso) {
             </div>
           </section>
 
+          <section v-if="saveLinkFailure" class="card save-card">
+            <span class="icon-warn icon-warn-sm" aria-hidden="true" />
+            <div class="save-card-body">
+              <div class="save-card-title">Saves are not going to {{ saveLinkFailure.profile }}</div>
+              <p class="save-card-text">{{ saveLinkFailure.text }}</p>
+              <button class="save-card-link" @click="RevealSaves(game._itemTitle).catch(() => {})">Reveal the folder</button>
+            </div>
+          </section>
+
           <section v-if="game.platforms?.length" class="card">
             <h2 class="eyebrow">Platforms</h2>
             <div class="platform-pills">
@@ -770,11 +821,15 @@ function formatDate(iso) {
 
 .back-bar {
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
   padding: 13px var(--pad-page);
   background: var(--bg);
   border-bottom: 1px solid var(--line);
   z-index: 3;
 }
+
+.back-spacer { flex: 1; }
 
 .back-btn {
   display: inline-flex;
@@ -1368,6 +1423,46 @@ function formatDate(iso) {
 }
 
 .platform-pills { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+
+/* ── Saves ── */
+.save-card {
+  display: flex;
+  gap: 11px;
+  align-items: flex-start;
+  padding: 15px 17px;
+  border-color: var(--line2);
+}
+
+.icon-warn-sm {
+  width: 15px;
+  height: 15px;
+  margin-top: 2px;
+  &::before { height: 7px; }
+}
+
+.save-card-body { min-width: 0; }
+
+.save-card-title {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.save-card-text {
+  margin: 4px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--dim);
+  text-wrap: pretty;
+}
+
+.save-card-link {
+  margin-top: 7px;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--accent);
+  &:hover { color: var(--accent-hi); }
+}
 
 /* ── Options ── */
 .options-hint {

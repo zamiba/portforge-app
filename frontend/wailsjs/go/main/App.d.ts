@@ -17,6 +17,8 @@ export function CleanBuildDir(arg1:string):Promise<void>;
 
 export function CreateProfile(arg1:string):Promise<main.ProfileInfo>;
 
+export function DeleteProfile(arg1:string):Promise<void>;
+
 export function GetActiveInstall():Promise<string>;
 
 export function GetCatalogActivity():Promise<main.CatalogActivity>;
@@ -73,6 +75,8 @@ export function OpenStorageUnit(arg1:string):Promise<void>;
 
 export function RefreshLibraryIndex():Promise<void>;
 
+export function RemoveProfilePicture(arg1:string):Promise<void>;
+
 export function RemoveStorageUnit(arg1:string):Promise<void>;
 
 export function RenameProfile(arg1:string,arg2:string):Promise<void>;
@@ -88,6 +92,8 @@ export function SelectROMFiles():Promise<Array<string>>;
 export function SetActiveProfile(arg1:string):Promise<void>;
 
 export function SetAutoRefreshCatalog(arg1:boolean):Promise<void>;
+
+export function SetProfilePicture(arg1:string):Promise<void>;
 
 export function SyncMediaItems():Promise<void>;
 

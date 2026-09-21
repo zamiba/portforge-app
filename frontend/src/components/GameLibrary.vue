@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, inject } from 'vue'
 import { artworkUrl, ART_WIDTH } from '../lib/artwork'
+import ThemeToggle from './ThemeToggle.vue'
 
 const props = defineProps({
   versions: { type: Array, required: true },
@@ -130,6 +131,7 @@ const countLine = computed(() => {
         <span class="search-glyph" aria-hidden="true" />
         <input v-model="search" type="search" placeholder="Search ports" aria-label="Search ports" />
       </label>
+      <ThemeToggle />
     </header>
 
     <div class="library-body">

@@ -185,11 +185,13 @@ ended: <port>`), pushed if `MediaItem/profile-sync.json` names a remote; the sam
 name `rclone-copy`, `rclone-sync` or `syncthing` backends. See the
 [`go-mediaitems-profiles`](https://github.com/zamiba/go-mediaitems-profiles) README for
 the file's shape. What came back is shown briefly in the app; failures are logged too.
-First-run setup asks for a name;
-leave it blank and PortForge keeps everything under a profile named `portforge`, which
-is an ordinary profile you can rename or replace later. Settings lists the profiles on
-this machine and switches between them, from the next launch on; a switch while a game
-is running is refused.
+First-run setup asks whose saves these are: name a profile of your own, or let PortForge
+make one named `portforge`, which is an ordinary profile you can rename or replace later.
+The last row of the sidebar says who is playing; clicking it (or *Manage profiles…* in
+Settings) opens the profile modal, where you switch, rename, create and delete profiles
+and give one a picture. A switch takes effect at once and is refused while a game is
+running. Deleting removes the folder from this device for every program that used it —
+the modal says so and asks twice — and the active profile cannot be deleted.
 
 Profiles live at `MediaItem/profiles/<profile>/` in the configuration directory, beside
 the storage-unit list, and inside one a port's data is at

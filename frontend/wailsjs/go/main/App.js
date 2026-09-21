@@ -26,6 +26,10 @@ export function CreateProfile(arg1) {
   return window['go']['main']['App']['CreateProfile'](arg1);
 }
 
+export function DeleteProfile(arg1) {
+  return window['go']['main']['App']['DeleteProfile'](arg1);
+}
+
 export function GetActiveInstall() {
   return window['go']['main']['App']['GetActiveInstall']();
 }
@@ -138,6 +142,10 @@ export function RefreshLibraryIndex() {
   return window['go']['main']['App']['RefreshLibraryIndex']();
 }
 
+export function RemoveProfilePicture(arg1) {
+  return window['go']['main']['App']['RemoveProfilePicture'](arg1);
+}
+
 export function RemoveStorageUnit(arg1) {
   return window['go']['main']['App']['RemoveStorageUnit'](arg1);
 }
@@ -168,6 +176,10 @@ export function SetActiveProfile(arg1) {
 
 export function SetAutoRefreshCatalog(arg1) {
   return window['go']['main']['App']['SetAutoRefreshCatalog'](arg1);
+}
+
+export function SetProfilePicture(arg1) {
+  return window['go']['main']['App']['SetProfilePicture'](arg1);
 }
 
 export function SyncMediaItems() {

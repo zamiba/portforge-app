@@ -50,11 +50,10 @@ func runServer(app *App, addr string, assets fs.FS) error {
 		w.Header().Set("Cache-Control", "no-store")
 		_, _ = w.Write([]byte(shimJS))
 	})
-	// The same artwork handler the desktop asset server mounts.
-	mux.Handle("/mediaitems/", http.StripPrefix("/mediaitems/", artworkHandler(
-		func() string { return app.metadataPath },
-		thumbCacheDir(),
-	)))
+	// The same asset handler the desktop asset server mounts.
+	files := assetHandler(app)
+	mux.Handle("/mediaitems/", files)
+	mux.Handle(profilePictureRoute, files)
 	mux.Handle("/", spaHandler(dist, index))
 
 	ln, err := net.Listen("tcp", addr)

@@ -9,6 +9,8 @@ import GameLibrary from './components/GameLibrary.vue'
 import GameDetail from './components/GameDetail.vue'
 import RomLibrary from './components/RomLibrary.vue'
 import Settings from './components/Settings.vue'
+import ProfileModal from './components/ProfileModal.vue'
+import { useProfiles } from './composables/useProfiles'
 
 const versions = ref([])
 const libraryStatus = ref({})
@@ -24,14 +26,25 @@ const needsSetup = ref(false)
 const libraryWarning = ref(null)
 
 // A quiet notice for things that happen on their own — the startup catalog
-// refresh finishing — shown briefly and never in the way.
-const notice = ref(null)
+// refresh finishing, a profile being committed after a session — shown
+// briefly and never in the way. Bad news persists until dismissed: a failed
+// profile sync is the only sign that saves did not leave the machine, and it
+// arrives after the game has closed and the person has probably walked away.
+const notice = ref(null) // { text, tone: 'dim' | 'bad' | 'warn', persistent }
 let noticeTimer = null
-function showNotice(text, ms = 6000) {
+function showNotice(text, { tone = 'dim', persistent = false } = {}) {
   clearTimeout(noticeTimer)
-  notice.value = text
-  noticeTimer = ms ? setTimeout(() => { notice.value = null }, ms) : null
+  notice.value = { text, tone, persistent }
+  noticeTimer = persistent ? null : setTimeout(() => { notice.value = null }, 6000)
 }
+function dismissNotice() {
+  clearTimeout(noticeTimer)
+  notice.value = null
+}
+
+// Who is playing. Loaded once the app is set up; the sidebar, Settings and
+// the profile modal all read the same state.
+const { modalOpen: profileModalOpen, load: loadProfiles } = useProfiles()
 
 const pendingDrop = ref(null)  // ROMDropSummary from MatchDroppedROMs
 const dropError = ref(null)
@@ -184,7 +197,7 @@ async function onSettingsSaved() {
   needsSetup.value = false
   error.value = null
   activeTab.value = 'library'
-  await loadLibrary()
+  await Promise.all([loadLibrary(), loadProfiles()])
 }
 
 onMounted(async () => {
@@ -195,6 +208,14 @@ onMounted(async () => {
   // The refresh reloads the library through catalog:activity like any other
   // sync; this is only the word that it happened, since nobody asked for it.
   EventsOn('catalog:refreshed', () => showNotice('Port catalog updated'))
+  // The active profile's folder is gone — deleted by hand, or the preferences
+  // came from another machine. Saves are going to the default from here on,
+  // which the person did not choose, so this stays until they have seen it.
+  // Registered before the first profile load, which is what would notice.
+  EventsOn('profile:missing', ({ slug, using }) => {
+    showNotice(`The profile folder for ${slug} is gone. PortForge is using ${using} until you pick another.`, { tone: 'warn', persistent: true })
+    loadProfiles()
+  })
   // A sync already under way when the page loads — the startup refresh, or a
   // page reloaded under -server — has no events behind it to replay.
   try {
@@ -207,7 +228,7 @@ onMounted(async () => {
     needsSetup.value = true
     return
   }
-  await loadLibrary()
+  await Promise.all([loadLibrary(), loadProfiles()])
 
   // Recover any install that was already running (e.g. after a dev hot-reload)
   const recovering = await GetActiveInstall()
@@ -261,12 +282,16 @@ onMounted(async () => {
   })
 
   // After a session the profile may be sent on — a git commit, an rclone
-  // copy — by whatever the user configured. A failure is worth a line; a
-  // success only when something was actually done, so a profile that is a
-  // repository with nothing new does not announce itself every time.
+  // copy — by whatever the user configured. A success is worth a line only
+  // when something was actually done, so a profile that is a repository with
+  // nothing new does not announce itself every time. A failure stays, and
+  // says what it is about: the copy, not the save.
   EventsOn('profile:synced', ({ kind, output, error }) => {
-    if (error) showNotice(`Profile sync (${kind}) failed: ${error}`, 12000)
-    else if (output && output !== 'nothing to commit') showNotice(`Profile ${kind}: ${output}`)
+    if (error) {
+      showNotice(`Profile sync (${kind}) failed: ${error}. Your saves are safe on this machine.`, { tone: 'bad', persistent: true })
+    } else if (output && output !== 'nothing to commit') {
+      showNotice(`Profile ${kind}: ${output}`)
+    }
   })
 })
 
@@ -283,6 +308,7 @@ onUnmounted(() => {
   EventsOff('game:started')
   EventsOff('game:ended')
   EventsOff('profile:synced')
+  EventsOff('profile:missing')
   clearInterval(playTimer)
 })
 
@@ -352,8 +378,9 @@ function dismissDrop() {
         <div class="drop-overlay-inner">Drop ROM file here</div>
       </div>
 
-      <div v-if="notice" class="notice-banner">
-        <span>{{ notice }}</span>
+      <div v-if="notice" class="notice-banner" :class="'notice-' + notice.tone">
+        <span>{{ notice.text }}</span>
+        <button v-if="notice.persistent" class="notice-dismiss" @click="dismissNotice">Dismiss</button>
       </div>
 
       <div v-if="libraryWarning" class="library-warning-banner">
@@ -430,6 +457,8 @@ function dismissDrop() {
         </template>
       </main>
     </div>
+
+    <ProfileModal v-if="profileModalOpen" />
 
     <!-- A child of the shell rather than the content area: this covers the whole
          window, sidebar included. Positioned inside the content area it stopped
@@ -518,12 +547,24 @@ main {
 .notice-banner {
   display: flex;
   align-items: center;
+  gap: 16px;
   padding: 8px 24px;
   background: var(--panel);
   border-bottom: 1px solid var(--line);
   color: var(--dim);
   font-size: 12.5px;
   flex-shrink: 0;
+
+  span { flex: 1; min-width: 0; }
+  &.notice-bad { color: var(--bad); }
+  &.notice-warn { color: var(--warn); }
+}
+
+.notice-dismiss {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--dim2);
+  &:hover { color: var(--text); }
 }
 
 .library-warning-banner {

@@ -6,8 +6,8 @@ require (
 	github.com/wailsapp/wails/v2 v2.12.0
 	github.com/zamiba/forge v0.0.8-alpha
 	github.com/zamiba/go-mediaitems v0.2.0
-	github.com/zamiba/go-mediaitems-profiles v0.1.0
-	golang.org/x/sys v0.42.0
+	github.com/zamiba/go-mediaitems-profiles v0.2.0
+	golang.org/x/sys v0.47.0
 	modernc.org/sqlite v1.50.1
 )
 
@@ -51,8 +51,9 @@ require (
 	github.com/wailsapp/mimetype v1.4.1 // indirect
 	go4.org v0.0.0-20260112195520-a5071408f32f // indirect
 	golang.org/x/crypto v0.46.0 // indirect
+	golang.org/x/image v0.45.0 // indirect
 	golang.org/x/net v0.48.0 // indirect
-	golang.org/x/text v0.37.0 // indirect
+	golang.org/x/text v0.41.0 // indirect
 	modernc.org/libc v1.72.3 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
