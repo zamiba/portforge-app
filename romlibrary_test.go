@@ -202,12 +202,10 @@ func TestCatalogSpecsPassTheInstallerCheck(t *testing.T) {
 			if missing := engine.UndeclaredArgs(&file.Specs[i]); len(missing) > 0 {
 				t.Errorf("%s build %d uses %s, which it does not declare", v.ItemTitle, i, joinArgNames(missing))
 			}
-			// The only provider PortForge registers. A misspelt ${romPath}
-			// is a reference to a provider that does not exist.
-			for _, name := range engine.ProviderRefs(&file.Specs[i]) {
-				if name != "rom" {
-					t.Errorf("%s build %d reads ${%sPath}, but PortForge only provides ${romPath}", v.ItemTitle, i, name)
-				}
+			// A misspelt ${romPath} is a reference to a provider that does
+			// not exist; ${profilePath} exists only at launch.
+			if err := checkProviderRefs(&file.Specs[i]); err != nil {
+				t.Errorf("%s build %d %v", v.ItemTitle, i, err)
 			}
 		}
 	}

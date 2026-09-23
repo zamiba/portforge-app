@@ -275,7 +275,7 @@ func TestOlderInstallsReadUserDataPathsFromTheSpec(t *testing.T) {
 		t.Fatal(err)
 	}
 	state, _ := metadata.ReadInstallState(versionDir)
-	paths, err := app.installedUserDataPaths("Link Port", versionDir, state)
+	paths, _, err := app.installedUserData("Link Port", versionDir, state)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -289,7 +289,7 @@ func TestOlderInstallsReadUserDataPathsFromTheSpec(t *testing.T) {
 func TestSaveLinksRefusePathsThatLeaveThePort(t *testing.T) {
 	app, versionDir := linkTestApp(t, linkSpec)
 	p, _ := app.profiles.Ensure("portforge", "portforge")
-	status, err := app.saveLinks("Link Port", versionDir, []string{"../other/saves", "/etc/passwd", "install/saves"}, p, false)
+	status, err := app.saveLinks("Link Port", versionDir, []string{"../other/saves", "/etc/passwd", "install/saves"}, nil, p, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -306,7 +306,7 @@ func TestSaveLinksRefusePathsThatLeaveThePort(t *testing.T) {
 func TestSaveLinksSurfaceTheModulesOwnGuard(t *testing.T) {
 	app, versionDir := linkTestApp(t, linkSpec)
 	p := profile.Profile{Slug: "x", Path: app.profiles.Dir()}
-	if _, err := app.saveLinks("../escape", versionDir, []string{"install/saves"}, p, false); err == nil {
+	if _, err := app.saveLinks("../escape", versionDir, []string{"install/saves"}, nil, p, false); err == nil {
 		t.Error("a title that leaves the profile should be refused")
 	}
 }

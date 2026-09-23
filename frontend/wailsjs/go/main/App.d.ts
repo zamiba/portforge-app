@@ -59,6 +59,8 @@ export function GetStorageUnits():Promise<Array<storageunit.StorageUnit>>;
 
 export function GetVersion(arg1:string):Promise<models.VideoGameVersion>;
 
+export function GetVersionNotices(arg1:string,arg2:string,arg3:string):Promise<Array<models.Notice>>;
+
 export function GetVersions():Promise<Array<models.VideoGameVersion>>;
 
 export function ImportROMs(arg1:Array<models.ROMFileMatch>,arg2:boolean):Promise<void>;

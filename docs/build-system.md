@@ -92,7 +92,7 @@ A `copy from:"rom"` step fails the install when no matching ROM is in the librar
 
 The folder is created the first time the game starts, so a port need not tolerate its absence. It mirrors the port's own folder on the storage unit: `<profiles>/<profile>/MediaItems/VideoGameFanPort/<port item title>/`. `${profilePath}` takes no qualifier; `${profilePath.x}` is a launch error.
 
-This is the arrangement to prefer for a port that accepts one. A port whose save location cannot be redirected keeps `userDataPaths` (below), which PortForge will link into the same profile folder in a later release.
+This is the arrangement to prefer for a port that accepts one. A port whose save location cannot be redirected keeps `userDataPaths` (below), which PortForge links into the same profile folder.
 
 ---
 
@@ -137,24 +137,79 @@ would lose them to the usual `deletePath install` teardown. Forge's file-level
 - **A failed build.** Restoration happens on the way out either way, so a build that dies
   halfway does not take the player's saves with it.
 
-Paths interpolate `$name` like any other, `$platform` and `$version` included, and are
-reported by `forge check` if they reference something the spec never declares.
+Paths interpolate `${name}` like any other, `${platform}` and `${version}` included, and
+are reported by `forge check` if they reference something the spec never declares.
 
 This covers ports that keep user data beside their own files, and it is also how those
 ports reach the profile. Each declared path is **linked** into the active profile: the
 real files live at the same relative path under the profile's folder for the port
 (`<profile>/MediaItems/VideoGameFanPort/<port>/install/saves`, say) and the port's own
 path is a symlink — a junction on Windows — pointing at them. The game writes where it
-always did. PortForge makes the links after an install (moving in whatever an older
-install left), before each launch (so a profile switch takes effect) and after each
-session (so data a game created for the first time is in the profile before it is sent
-on). Nothing is ever merged: a path with data on both sides is left as it is and reported
-on the game page, and the game runs with its saves where they were. Single files cannot
-be linked without privileges on Windows and stay beside the game there.
+always did. PortForge makes the links at startup and after an install (moving in
+whatever an older install left), when a profile is switched or created, before each
+launch and after each session (so data a game created for the first time is in the
+profile before it is sent on). Nothing is ever merged: a path with data on both sides is
+left as it is and reported on the game page, and the game runs with its saves where they
+were. Single files cannot be linked without privileges on Windows and stay beside the
+game there.
 
 A port that accepts a flag pointing its save directory elsewhere is the simpler
 arrangement — give it `${profilePath}` (above) and declare nothing here. The two can
 coexist in one spec.
+
+### Data outside the port's folder
+
+A `runDir` entry — `{ "locationType": "runDir", "path": "install/saves" }`, or the
+deprecated bare string that means the same — is relative to the port's own folder and may
+not leave it: the catalog is synced from a public repository, and a spec must not be able
+to name a file elsewhere on the machine for PortForge to move or delete. A port that
+writes its saves to a per-user location instead — `~/.local/share/<name>`, `%APPDATA%\<name>`, `~/Library/Application
+Support/<name>` — and takes no flag to redirect them declares that place in the same
+list, as an object naming a **location type** and a path beneath it:
+
+```json
+"userDataPaths": [
+  { "locationType": "linuxData", "path": "melee-pc" },
+  { "locationType": "windowsRoaming", "path": "melee-pc" }
+]
+```
+
+The location types are forge's vocabulary — `runDir` for the port's own folder, and the
+per-user folders each platform gives programs, named the way the platform's programs name
+them (`linuxConfig`, `linuxData`, `windowsRoaming`, `windowsLocal`, `windowsDocuments`,
+`windowsSavedGames`, `macosApplicationSupport`); the table is in forge's README under
+*User data*. Each is
+for one platform, so a port that writes somewhere different on each declares one entry
+per platform, and an entry for another platform is simply not this machine's business.
+Forge parses the entry, checks that the path stays beneath the folder, and resolves the
+folder on the machine; it does nothing with it during a run, because its own
+protections — the `deletePath` sparing, the install set-aside — are for the tree.
+
+PortForge links the place into the profile exactly as it does a string entry — the data
+moves to `<profile>/MediaItems/VideoGameFanPort/<port>/<path>`, the place becomes a link
+to it, and the game writes where it always did. The profile side is the entry's path
+alone, not `<type>/<path>`, on purpose: a port that writes to `linuxData` on a Steam
+Deck and `windowsRoaming` on a PC keeps one set of saves in a profile the two share,
+as its in-tree paths already do. One thing PortForge refuses on top of forge's checks,
+and reports on the game page rather than acts on: a path that reaches PortForge's own
+folders — the profiles, the storage-unit list, its settings, the catalog or the storage
+unit — since linking those into a profile would be linking a profile into itself.
+
+Uninstalling removes the link PortForge planted at such a place, when it is PortForge's
+link into a profile, and leaves the data in the profile. A folder there that was never
+linked is not the uninstall's to touch.
+
+Linking reads the catalog's current spec for the installed version, so a port whose
+`userDataPaths` grow after it was installed is covered without a reinstall.
+
+Of the catalog's ports as of September 2026: Super Mario 64 Render96 takes `--savepath`
+and receives `${profilePath}`; Banjo Recompiled, Gen1Recomp and Super Mario Bros.
+Remastered are put in portable mode by their specs; the libultraship ports (Ship of
+Harkinian, Starship, SpaghettiKart, Ghostship), Snap64 Recomp, Open Nectar, the Crash
+Bandicoot launcher and DBZ Budokai 3 write beside their executable as shipped; reBlue
+keeps its own profiles beside the executable on Windows and under `~/.config/reblue` on
+Linux (`linuxConfig`); melee-pc writes only to SDL's preference directory (`linuxData`,
+`windowsRoaming`).
 
 ---
 

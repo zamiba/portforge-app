@@ -176,6 +176,35 @@ func (a *App) romProvider(version *models.VideoGameVersion) (engine.Provider, er
 // joinArgNames renders undeclared variable names the way they appear in the
 // spec, so the message can be searched for in the file it is about.
 // joinVarNames renders names the way a spec must now write them.
+// checkProviderRefs refuses a spec that reads a provider PortForge does not
+// register where it reads it. The run resolves ${romPath} only; launch
+// arguments are left verbatim by the run and resolved at launch (see
+// Executable.LaunchArgs), where ${profilePath} is available too.
+func checkProviderRefs(spec *engine.Spec) error {
+	run := *spec
+	run.Steps = make([]engine.Step, len(spec.Steps))
+	var launch []string
+	for i, step := range spec.Steps {
+		if step.Step == "defineExecutable" {
+			launch = append(launch, step.Args...)
+			step.Args, step.Raw = nil, nil
+		}
+		run.Steps[i] = step
+	}
+	for _, name := range engine.ProviderRefs(&run) {
+		if name != "rom" {
+			return fmt.Errorf("reads ${%sPath}, and PortForge has no %q provider — only ${romPath} is available here", name, name)
+		}
+	}
+	args := engine.Spec{Steps: []engine.Step{{Step: "run", Args: launch}}}
+	for _, name := range engine.ProviderRefs(&args) {
+		if name != "rom" && name != "profile" {
+			return fmt.Errorf("launches with ${%sPath}, and PortForge has no %q provider — only ${romPath} and ${profilePath} are available at launch", name, name)
+		}
+	}
+	return nil
+}
+
 func joinVarNames(names []string) string {
 	braced := make([]string, len(names))
 	for i, n := range names {

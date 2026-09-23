@@ -57,7 +57,8 @@
 }
 
 .icon-cross,
-.icon-warn {
+.icon-warn,
+.icon-info {
   width: 20px;
   height: 20px;
   border-radius: 50%;
@@ -82,5 +83,13 @@
 .icon-warn {
   border-color: var(--warn);
   &::before { transform: translate(-50%, -50%) rotate(90deg); height: 9px; width: 1.5px; background: var(--warn); }
+  &::after { display: none; }
+}
+
+/* The same mark as the warning, in the accent colour: an informational notice is
+   worth reading before installing, but nothing about it is wrong. */
+.icon-info {
+  border-color: var(--accent);
+  &::before { transform: translate(-50%, -50%) rotate(90deg); height: 9px; width: 1.5px; background: var(--accent); }
   &::after { display: none; }
 }

@@ -99,6 +99,7 @@ export namespace main {
 	}
 	export class SaveLink {
 	    path: string;
+	    location?: string;
 	    state: string;
 	    reason?: string;
 	
@@ -109,6 +110,7 @@ export namespace main {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.path = source["path"];
+	        this.location = source["location"];
 	        this.state = source["state"];
 	        this.reason = source["reason"];
 	    }
@@ -677,11 +679,28 @@ export namespace models {
 	
 	
 	
+	export class Notice {
+	    type: string;
+	    affectedPlatforms?: string[];
+	    message: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new Notice(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.type = source["type"];
+	        this.affectedPlatforms = source["affectedPlatforms"];
+	        this.message = source["message"];
+	    }
+	}
 	export class SoftwareVersion {
 	    _itemType: string;
 	    title: string;
 	    date?: string;
 	    content?: string;
+	    notices?: Notice[];
 	
 	    static createFrom(source: any = {}) {
 	        return new SoftwareVersion(source);
@@ -693,7 +712,26 @@ export namespace models {
 	        this.title = source["title"];
 	        this.date = source["date"];
 	        this.content = source["content"];
+	        this.notices = this.convertValues(source["notices"], Notice);
 	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 	export class VideoGame {
 	    _itemType: string;

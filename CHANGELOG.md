@@ -2,9 +2,26 @@
 
 All notable changes to PortForge are recorded here.
 
-## v0.3.4-alpha — Unreleased
+## v0.3.4-alpha — 2026-09-23
 
 ### Added
+
+**A release can carry notices, and they are shown before you install it.** A version in
+the catalog may now record caveats against itself — a bug that stops it launching on one
+platform, something worth knowing before committing to the install — and PortForge shows
+them at the top of the right-hand column, above Installation, for the version and the
+build platform currently selected. They sit on the release rather than on the game, which
+makes them a permanent record of that build instead of a live status: a version that
+shipped broken stays marked, and a later release that fixes the problem simply carries no
+notice, so nothing has to be un-said when the fix lands. A notice is markdown, so it can
+link to the issue tracking the problem, and names the platforms it applies to — a
+Windows-only bug stays silent on Linux, one naming no platform applies to all of them, and
+naming the bare OS covers every architecture of it. Because the catalog is synced from
+GitHub independently of app releases, a notice of a kind this version of PortForge does not
+recognize is still shown, as a warning, rather than discarded: a warning that vanishes
+because the app is behind the catalog would be worse than having none. The case that
+prompted this is Ghostship on Windows, which cannot read its own folder when the path holds
+a non-ASCII character and so refuses to launch from the name PortForge installs it under.
 
 **A catalog update or index rebuild is shown in a status bar, wherever you are.** A sync
 used to be visible only on the Settings page that started it, and the background refresh
@@ -26,21 +43,30 @@ does not sync, snapshot or merge them. Nobody has to create one: first-run setup
 whose saves these are — a profile of your own, or one PortForge makes, named `portforge`,
 which is an ordinary profile that can be renamed or replaced. The sidebar's last row says
 who is playing and opens the profile modal, where profiles are switched, renamed and
-created, given a picture and deleted; Settings summarises the active one and opens the
+created, given a picture and deleted; Settings summarizes the active one and opens the
 same modal. A switch takes effect at once — every installed port's save links are
 re-pointed there and then — and is refused while a game runs. Deleting is a two-step act
 with a warning worded for the whole suite, since the folder holds more than game saves;
 the active profile cannot be deleted. A picture is cropped square and scaled by the
 profiles module and kept inside the profile folder, so the other programs show the same
-one. A spec can
-now put `${profilePath}` in a `defineExecutable` step's `args`, next to the port's own
-flag — `"args": ["--save-dir", "${profilePath}"]` — and PortForge resolves it to the
-active profile's folder for that port every time the game starts, creating it on first
-use. A port that keeps its saves beside itself — the paths its spec lists in
+one. A spec can now put `${profilePath}` in a `defineExecutable` step's `args`, next to
+the port's own flag — `"args": ["--save-dir", "${profilePath}"]` — and PortForge resolves
+it to the active profile's folder for that port every time the game starts, creating it
+on first use. A port that keeps its saves beside itself — the paths its spec lists in
 `userDataPaths` — has those paths linked into the profile instead: the files move there,
-the port's path becomes a link to them, and the game writes where it always did. Links are
-made after an install, before each launch (so switching profiles takes effect) and after
-each session. Data is never merged; a path with data on both sides is left alone and
+the port's path becomes a link to them, and the game writes where it always did. A port
+that writes to a per-user folder — `~/.local/share/<name>`, `%APPDATA%\<name>` — and
+takes no flag to redirect it is reached the same way through an object entry in the same
+list — `{ "locationType": "linuxData", "path": "melee-pc" }` — naming one of the
+platform's per-user folders and a path beneath it; forge resolves the folder, PortForge
+refuses a path that reaches its own folders, links the place and removes the link again
+on uninstall. The profile side is the entry's path alone, so a port that writes to
+`linuxData` on one machine and `windowsRoaming` on another keeps one set of saves in a
+profile the two share. Links are made at startup, after an
+install, when a profile is switched or created, before each launch and after each
+session, so saves from before profiles existed are in the profile the first time PortForge
+runs with one. Linking reads the catalog's current spec, so a port whose spec learns where
+its saves are after the install is covered without a reinstall. Data is never merged; a path with data on both sides is left alone and
 reported. On Windows, folders are linked as junctions and single files stay with the game.
 When a session ends
 PortForge tells the profiles module the profile changed, and the module sends it wherever
@@ -56,6 +82,13 @@ the new `go-mediaitems-profiles` module (v0.2.0) and `go-mediaitems` v0.2.0.
 
 ### Changed
 
+**The build engine is Forge v0.0.10-alpha**, which adds the object form of a
+`userDataPaths` entry above and resolves its location types. It also adds `runDir`, the
+location type for a path inside the port's own folder, so every entry in the list can now
+be written the same way whichever side of the port's folder it is on — a bare string
+still reads and means the same thing, and every protection the engine gives those paths
+is unchanged either way.
+
 **The dark/light toggle has moved from the sidebar to each page's top bar.** The
 sidebar's bottom slot now belongs to the profile row.
 
@@ -65,6 +98,13 @@ kept side by side can be told apart, and the Windows and macOS files follow the 
 pattern (`portforge-<version>-windows-amd64.exe`, `portforge-<version>-macos-universal.zip`).
 
 ### Fixed
+
+**A spec that launches with `${profilePath}` is no longer refused at install.** The
+installer checks that a spec reads only providers PortForge registers, and that check did
+not know that launch arguments are left alone by the run and resolved at launch — where
+`${profilePath}` exists — so the first catalog port to use it (Super Mario 64 Render96,
+through its `--savepath` flag) could not be installed. The check now tells the run's steps
+from the launch arguments, and names what is available in each.
 
 **Covers no longer show a hairline of background along their top edge.** The tile's
 one-pixel border shrank the box the image had to fit, so a 2:3 cover could not fill a 2:3

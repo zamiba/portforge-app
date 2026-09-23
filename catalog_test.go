@@ -166,3 +166,35 @@ func TestCatalogSpecsDeclareEveryVariableTheyUse(t *testing.T) {
 		})
 	}
 }
+
+// An entry outside the tree is checked by the engine at parse time — the
+// type, the path staying beneath it — so every one the catalog declares is
+// resolvable on the platform it names. What is checked here is that they parse
+// at all, and how many there are, so a catalog without any is noticed.
+func TestCatalogEntriesOutsideTheTreeParse(t *testing.T) {
+	app := newCatalogApp(t)
+	versions, err := app.GetVersions()
+	if err != nil {
+		t.Fatal(err)
+	}
+	checked := 0
+	for _, v := range versions {
+		file, err := metadata.LoadSpecFile(app.metadataPath, v.ItemTitle)
+		if err != nil {
+			t.Errorf("%s: %v", v.ItemTitle, err)
+			continue
+		}
+		if file == nil || len(file.Specs) == 0 {
+			continue
+		}
+		for _, e := range file.Specs[0].UserData {
+			if e.Outside() {
+				checked++
+			}
+		}
+	}
+	if checked == 0 {
+		t.Error("no entry outside the tree in the catalog; melee-pc and reBlue declare them")
+	}
+	t.Logf("%d entries checked", checked)
+}

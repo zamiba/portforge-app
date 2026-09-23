@@ -904,13 +904,10 @@ func (a *App) InstallVersion(itemTitle string, args map[string]string, specVersi
 			itemTitle, joinArgNames(stale))
 	}
 	// A spec can read a provider by name — ${romPath} — but cannot declare one;
-	// the host registers them, and PortForge registers exactly one. Anything
-	// else would fail at the step that reads it, after the download.
-	for _, name := range engine.ProviderRefs(spec) {
-		if name != "rom" {
-			return fmt.Errorf("the install spec for %s reads ${%sPath}, and PortForge has no %q provider — only ${romPath} is available here",
-				itemTitle, name, name)
-		}
+	// the host registers them. Anything else would fail at the step that reads
+	// it, after the download.
+	if err := checkProviderRefs(spec); err != nil {
+		return fmt.Errorf("the install spec for %s %v", itemTitle, err)
 	}
 
 	// Installing over an existing install is how an update happens, and a build
@@ -970,6 +967,46 @@ func (a *App) GetSpecVersions(itemTitle string) ([]engine.SpecVersion, error) {
 	out := make([]engine.SpecVersion, len(declared))
 	for i, v := range declared {
 		out[len(declared)-1-i] = v
+	}
+	return out, nil
+}
+
+// GetVersionNotices returns the notices to show for one version of a port, for the
+// platform it is about to be built for. They live on the matching SoftwareVersion
+// in the item's own metadata, beside that release's notes, so a version with no
+// entry there — or an entry whose title matches no build — simply has none.
+//
+// The platform is the build target the user picked rather than the host, since
+// PortForge can build for a platform it does not run on, and a warning about
+// Windows is wanted by whoever is targeting Windows. An empty platform falls back
+// to the host's.
+//
+// Each returned notice carries its resolved Level() as its Type, so the caller
+// renders what it is handed instead of deciding for itself what an unknown type
+// means.
+func (a *App) GetVersionNotices(itemTitle, version, platform string) ([]models.Notice, error) {
+	if version == "" {
+		return nil, nil
+	}
+	v, err := metadata.LoadOneVersion(a.metadataPath, itemTitle)
+	if err != nil || v == nil {
+		return nil, err
+	}
+	if platform == "" {
+		platform = a.GetPlatform()
+	}
+	var out []models.Notice
+	for _, sv := range v.Versions {
+		if sv.Title != version {
+			continue
+		}
+		for _, n := range sv.Notices {
+			if n.AppliesTo(platform) {
+				n.Type = n.Level()
+				out = append(out, n)
+			}
+		}
+		break
 	}
 	return out, nil
 }
@@ -1044,6 +1081,13 @@ func (a *App) UninstallVersion(itemTitle string) error {
 		_, cleanupErr = a.runSpec(a.ctx, opts, version, versionDir)
 	} else {
 		cleanupErr = os.RemoveAll(filepath.Join(versionDir, "install"))
+	}
+
+	// A link planted outside the port's folder — a userData entry — is not
+	// the teardown's to remove and would otherwise dangle there. The data it
+	// pointed at stays in the profile; only the link goes.
+	if installed != nil {
+		a.unlinkUserData(itemTitle, versionDir, installed)
 	}
 
 	// Always clear the installed flag, even if cleanup steps partially failed.
@@ -1616,8 +1660,8 @@ func (a *App) writeInstallState(versionDir string, spec *engine.Spec, exes []mod
 		InstalledAt:      time.Now().UTC().Format(time.RFC3339),
 	}
 	if spec != nil {
-		// Recorded resolved, so linking never re-reads a spec the catalog may
-		// since have changed under an install made from the old one.
+		// Recorded resolved, as the fallback for linking when the catalog no
+		// longer has a spec for this version.
 		state.UserDataPaths = userDataPathsOf(spec, targetPlatform, version, args)
 	}
 	if err := metadata.WriteInstallState(versionDir, state); err != nil {

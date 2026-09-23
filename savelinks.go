@@ -23,12 +23,24 @@ import (
 // did and the data lands in the profile, where the other tier — ${profilePath}
 // — already puts it, and where a sync tool finds it.
 //
-// Linking runs at three moments, and is the same idempotent pass each time:
-// after an install (data from before profiles existed is moved in), before a
-// launch (a profile switch re-points the links), and after a session (data the
-// game created for the first time is moved in before the profile is synced).
-// Nothing here ever deletes data: a path with data on both sides is left alone
-// and reported, not merged.
+// A port that writes somewhere else — its own folder under ~/.config or
+// %APPDATA%, say — and takes no flag to redirect it is reached the same way
+// through an object entry in the same list: {locationType, path} names one
+// of the platform's per-user folders and a path beneath it, and that place
+// gets the link. The spec never holds a real location, only a type's name
+// and a relative path; the engine resolves the type and keeps the path
+// beneath it, and PortForge refuses a place inside its own folders. That is
+// the confinement a synced catalog needs. The profile side of such an entry
+// is <path> alone, not <type>/<path>: a port that writes to linuxData on one
+// machine and windowsRoaming on another keeps one set of saves in a profile
+// the two share, as its in-tree paths already do.
+//
+// Linking runs at startup, after an install (data from before profiles existed
+// is moved in), when a profile is switched or created, before a launch and
+// after a session (data the game created for the first time is moved in before
+// the profile is synced). It is the same idempotent pass each time. Nothing
+// here ever deletes data: a path with data on both sides is left alone and
+// reported, not merged.
 
 // Link states, as GetSaveLinks reports them.
 const (
@@ -39,11 +51,12 @@ const (
 	linkError       = "error"       // the filesystem refused
 )
 
-// SaveLink is one userDataPaths entry and where it stands.
+// SaveLink is one declared path and where it stands.
 type SaveLink struct {
-	Path   string `json:"path"`             // relative to the port's folder, as declared
-	State  string `json:"state"`            // one of the link* constants
-	Reason string `json:"reason,omitempty"` // for conflict, unsupported and error
+	Path     string `json:"path"`               // as declared: relative to the port's folder, or <root>/<path>
+	Location string `json:"location,omitempty"` // where that is on this machine, for a userData entry
+	State    string `json:"state"`              // one of the link* constants
+	Reason   string `json:"reason,omitempty"`   // for conflict, unsupported and error
 }
 
 // SaveLinkStatus is what the game page asks for: which profile this port's
@@ -70,11 +83,11 @@ func (a *App) GetSaveLinks(itemTitle string) (SaveLinkStatus, error) {
 	if err != nil {
 		return SaveLinkStatus{}, err
 	}
-	paths, err := a.installedUserDataPaths(itemTitle, versionDir, state)
+	paths, entries, err := a.installedUserData(itemTitle, versionDir, state)
 	if err != nil {
 		return SaveLinkStatus{}, err
 	}
-	return a.saveLinks(itemTitle, versionDir, paths, p, true)
+	return a.saveLinks(itemTitle, versionDir, paths, entries, p, true)
 }
 
 // RevealSaves opens the active profile's folder for this port in the file
@@ -98,12 +111,12 @@ func (a *App) RevealSaves(itemTitle string) error {
 // done, and never fails the caller — a game whose saves could not be linked
 // still runs, with its saves where they were.
 func (a *App) linkSaves(itemTitle, versionDir string, state *models.InstallState, p profile.Profile) {
-	paths, err := a.installedUserDataPaths(itemTitle, versionDir, state)
+	paths, entries, err := a.installedUserData(itemTitle, versionDir, state)
 	if err != nil {
 		log.Printf("save links for %s: %v", itemTitle, err)
 		return
 	}
-	status, err := a.saveLinks(itemTitle, versionDir, paths, p, false)
+	status, err := a.saveLinks(itemTitle, versionDir, paths, entries, p, false)
 	if err != nil {
 		log.Printf("save links for %s: %v", itemTitle, err)
 		return
@@ -115,17 +128,44 @@ func (a *App) linkSaves(itemTitle, versionDir string, state *models.InstallState
 	}
 }
 
-// installedUserDataPaths returns the port's user-data paths, interpolated and
-// relative to versionDir. Installs made since this was recorded carry them in
-// their state; older ones are read from the spec that was installed, with the
-// same args the build had, which is what the state records instead.
-func (a *App) installedUserDataPaths(itemTitle, versionDir string, state *models.InstallState) ([]string, error) {
-	if state.UserDataPaths != nil {
-		return state.UserDataPaths, nil
+// unlinkUserData removes the links a port's entries outside the tree planted
+// there, when they point into a profile. Anything else at those places —
+// the port's own data, if it was never linked, or a link someone else made —
+// is left alone.
+func (a *App) unlinkUserData(itemTitle, versionDir string, state *models.InstallState) {
+	if a.profiles == nil {
+		return
 	}
+	_, entries, err := a.installedUserData(itemTitle, versionDir, state)
+	if err != nil {
+		log.Printf("save links for %s: %v", itemTitle, err)
+		return
+	}
+	for _, e := range entries {
+		location, err := a.userDataLocation(e)
+		if err != nil {
+			continue
+		}
+		if target, ok := readLink(location); ok && within(target, a.profiles.Dir()) {
+			if err := os.Remove(location); err != nil {
+				log.Printf("save links for %s: could not remove %s: %v", itemTitle, location, err)
+			}
+		}
+	}
+}
+
+// installedUserData returns what an installed port declares as the player's:
+// the in-tree paths of its userDataPaths, interpolated and relative to
+// versionDir, and the entries outside the tree that are for this platform.
+//
+// Both come from the catalog's spec for the installed version, with the args
+// the build had: a spec that learns where a port keeps its saves after the
+// install should reach that install, not wait for a reinstall. The paths the
+// install recorded are the fallback for a spec the catalog no longer has.
+func (a *App) installedUserData(itemTitle, versionDir string, state *models.InstallState) ([]string, []engine.UserDataPath, error) {
 	specs, err := metadata.LoadInstallationSpecs(a.metadataPath, itemTitle)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	platform := state.TargetPlatform
 	if platform == "" {
@@ -133,9 +173,21 @@ func (a *App) installedUserDataPaths(itemTitle, versionDir string, state *models
 	}
 	spec := engine.Select(specs, platform, state.InstalledVersion)
 	if spec == nil {
-		return nil, nil
+		return state.UserDataPaths, nil, nil
 	}
-	return userDataPathsOf(spec, platform, state.InstalledVersion, state.Args), nil
+	// An entry outside the tree is for the platform its location type names;
+	// the ones for another platform are not this machine's business.
+	var entries []engine.UserDataPath
+	for _, e := range spec.UserData {
+		if !e.Outside() {
+			continue
+		}
+		if _, err := e.Location(); errors.Is(err, engine.ErrOtherPlatform) {
+			continue
+		}
+		entries = append(entries, e)
+	}
+	return userDataPathsOf(spec, platform, state.InstalledVersion, state.Args), entries, nil
 }
 
 // userDataPathsOf interpolates a spec's userDataPaths the way the engine
@@ -170,28 +222,81 @@ func userDataPathsOf(spec *engine.Spec, platform, version string, args map[strin
 	return out
 }
 
-// saveLinks classifies every path and, unless dry, brings it to the linked
-// state where that can be done without touching data.
-func (a *App) saveLinks(itemTitle, versionDir string, paths []string, p profile.Profile, dry bool) (SaveLinkStatus, error) {
+// saveLinks classifies every declared path and, unless dry, brings it to the
+// linked state where that can be done without touching data. A path inside
+// the port's folder mirrors its relative path under the profile's folder for
+// the port; an entry outside it mirrors its path there, the same on every
+// platform.
+func (a *App) saveLinks(itemTitle, versionDir string, paths []string, entries []engine.UserDataPath, p profile.Profile, dry bool) (SaveLinkStatus, error) {
 	itemDir, err := p.ItemDir(metadata.PortItemType, itemTitle)
 	if err != nil {
 		return SaveLinkStatus{}, err
 	}
 	status := SaveLinkStatus{Profile: p.Name, Slug: p.Slug, Folder: itemDir}
-	for _, rel := range paths {
-		l := SaveLink{Path: rel}
-		clean, err := confinedRel(rel)
+	add := func(l SaveLink, port, prof string, err error) {
 		if err != nil {
 			l.State, l.Reason = linkError, err.Error()
 		} else {
-			l.State, l.Reason = linkOne(filepath.Join(versionDir, clean), filepath.Join(itemDir, clean), dry)
+			l.State, l.Reason = linkOne(port, prof, dry)
 		}
 		if l.State == linkConflict || l.State == linkUnsupported || l.State == linkError {
 			status.Failed = true
 		}
 		status.Links = append(status.Links, l)
 	}
+	for _, rel := range paths {
+		clean, err := confinedRel(rel)
+		add(SaveLink{Path: rel}, filepath.Join(versionDir, clean), filepath.Join(itemDir, clean), err)
+	}
+	for _, e := range entries {
+		l := SaveLink{Path: e.LocationType + ":" + e.Path}
+		port, err := a.userDataLocation(e)
+		l.Location = port
+		add(l, port, filepath.Join(itemDir, filepath.FromSlash(e.Path)), err)
+	}
 	return status, nil
+}
+
+// userDataLocation resolves an entry outside the tree to the place on this
+// machine the port writes to. The engine resolved the location type and kept
+// the path beneath it; what is checked here is PortForge's own concern — that
+// the place is not one of PortForge's own folders, which hold every profile
+// and would link a profile into itself.
+func (a *App) userDataLocation(e engine.UserDataPath) (string, error) {
+	location, err := e.Location()
+	if err != nil {
+		return "", err
+	}
+	for _, own := range a.ownFolders() {
+		if own != "" && (within(location, own) || within(own, location)) {
+			return "", fmt.Errorf("userDataPaths: %s:%s is where PortForge keeps its own data", e.LocationType, e.Path)
+		}
+	}
+	return location, nil
+}
+
+// ownFolders lists the places an entry outside the tree must never touch:
+// the folder holding every profile and the storage-unit list beside it,
+// PortForge's settings, the catalog, and the storage unit the ports are
+// installed on.
+func (a *App) ownFolders() []string {
+	own := []string{a.metadataPath, a.dataPath}
+	if a.profiles != nil {
+		own = append(own, filepath.Dir(a.profiles.Dir()))
+	}
+	if dir, err := configDir(); err == nil {
+		own = append(own, dir)
+	}
+	return own
+}
+
+// within reports whether path is dir or inside it, by name.
+func within(path, dir string) bool {
+	rel, err := filepath.Rel(filepath.Clean(dir), filepath.Clean(path))
+	if err != nil {
+		return false
+	}
+	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
 }
 
 // confinedRel cleans a declared path and refuses one that would leave the

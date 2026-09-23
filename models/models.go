@@ -1,5 +1,7 @@
 package models
 
+import "strings"
+
 type ParentItemType struct {
 	Title         string `json:"title"`
 	SchemaVersion string `json:"schemaVersion"`
@@ -202,10 +204,82 @@ type GameVersion struct {
 // in the same item's .forge.json, which is what makes a release's notes findable
 // from the version the user picked. Content is markdown.
 type SoftwareVersion struct {
-	ItemType string `json:"_itemType"`
-	Title    string `json:"title"`
-	Date     string `json:"date,omitempty"`
-	Content  string `json:"content,omitempty"`
+	ItemType string   `json:"_itemType"`
+	Title    string   `json:"title"`
+	Date     string   `json:"date,omitempty"`
+	Content  string   `json:"content,omitempty"`
+	Notices  []Notice `json:"notices,omitempty"`
+}
+
+// The notice types the app renders. A notice earns a new type only when a port
+// needs one, per the standard's additive-only rule.
+const (
+	NoticeInfo    = "info"
+	NoticeWarning = "warning"
+)
+
+// Notice is a caveat carried by one released version of a port: something worth
+// knowing before installing or launching it, such as a bug that stops it running
+// on a platform. It lives on the version rather than on the item because it is a
+// permanent record of that release, not live status — a version that shipped
+// broken stays broken, and a later release that fixes it simply carries no
+// notice, so the array is only ever appended to.
+//
+// Message is markdown, so a notice can link to the upstream issue tracking the
+// problem. AffectedPlatforms holds targetPlatforms tokens — "Windows", "Mac",
+// "Linux" — and an empty list means every platform, so a notice that is not
+// platform-specific need not name them all.
+type Notice struct {
+	Type              string   `json:"type"`
+	AffectedPlatforms []string `json:"affectedPlatforms,omitempty"`
+	Message           string   `json:"message"`
+}
+
+// Level returns the type this notice should be rendered as. An unrecognised type
+// becomes a warning rather than being dropped: the catalog is synced from GitHub
+// independently of app releases, so an older PortForge will meet notices written
+// for a newer one, and a warning that vanishes because the app is behind defeats
+// the purpose of having notices at all.
+func (n Notice) Level() string {
+	if strings.EqualFold(n.Type, NoticeInfo) {
+		return NoticeInfo
+	}
+	return NoticeWarning
+}
+
+// AppliesTo reports whether the notice is shown when building for platform. An
+// empty AffectedPlatforms matches every platform; an entry this version of
+// PortForge does not recognise matches nothing, so a token added to the catalog
+// later does not start warning everybody.
+//
+// Tokens are matched the way a spec's targetPlatforms are spelled, where an
+// architecture may be appended: "Mac-arm64". A notice naming the bare OS applies
+// to every architecture of it, and one naming an architecture applies to a build
+// target that names no architecture, since such a target is one build covering
+// all of them. Two different architectures of the same OS do not match, so an
+// arm64-only bug does not warn an x64 build.
+func (n Notice) AppliesTo(platform string) bool {
+	if len(n.AffectedPlatforms) == 0 {
+		return true
+	}
+	base := platformTokenBase(platform)
+	for _, p := range n.AffectedPlatforms {
+		if strings.EqualFold(p, platform) ||
+			strings.EqualFold(p, base) ||
+			strings.EqualFold(platformTokenBase(p), platform) {
+			return true
+		}
+	}
+	return false
+}
+
+// platformTokenBase strips the architecture from a platform token, leaving the
+// bare OS name. It mirrors the spec's own convention for these tokens.
+func platformTokenBase(platform string) string {
+	if i := strings.Index(platform, "-"); i >= 0 {
+		return platform[:i]
+	}
+	return platform
 }
 
 // VideoGameVersion is a top-level MediaItem representing a standalone version/port.

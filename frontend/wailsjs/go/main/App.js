@@ -110,6 +110,10 @@ export function GetVersion(arg1) {
   return window['go']['main']['App']['GetVersion'](arg1);
 }
 
+export function GetVersionNotices(arg1, arg2, arg3) {
+  return window['go']['main']['App']['GetVersionNotices'](arg1, arg2, arg3);
+}
+
 export function GetVersions() {
   return window['go']['main']['App']['GetVersions']();
 }

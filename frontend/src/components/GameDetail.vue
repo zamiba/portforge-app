@@ -6,7 +6,7 @@ import {
   GetROMStatus, GetInstallState, GetInstallPrompts,
   GetSpecVersions, GetInstallSize, LaunchVersion, CleanBuildDir, UninstallVersion,
   GetItemUpdate, UpdateMediaItem, SelectROMFiles, AddROMFiles,
-  GetSaveLinks, RevealSaves,
+  GetSaveLinks, RevealSaves, GetVersionNotices,
 } from '../../wailsjs/go/main/App'
 import { artworkUrl, ART_WIDTH } from '../lib/artwork'
 import { useRomRequirements } from '../composables/useRomRequirements'
@@ -181,6 +181,38 @@ const releaseNotesHtml = computed(() =>
   releaseNotes.value?.content ? marked.parse(releaseNotes.value.content) : ''
 )
 
+// Notices the catalog records against the selected release, for the platform it
+// would be built for. Resolved in Go rather than here: which types and platform
+// tokens a notice applies to is policy, and an app meeting a catalog newer than
+// itself has to show a notice it does not recognise rather than drop it.
+const notices = ref([])
+let noticesRequest = 0
+
+watch(
+  () => [props.game._itemTitle, selectedVersion.value, selectedPlatform.value],
+  async ([itemTitle, version, platform]) => {
+    const request = ++noticesRequest
+    if (!version) {
+      notices.value = []
+      return
+    }
+    let got = []
+    try {
+      got = await GetVersionNotices(itemTitle, version, platform) ?? []
+    } catch (err) {
+      console.error('notices:', err)
+    }
+    // A slower reply for a version the user has already moved off would otherwise
+    // land on top of the current one.
+    if (request === noticesRequest) notices.value = got
+  },
+  { immediate: true }
+)
+
+// Inline rather than block: a notice is one sentence that may carry a link to the
+// issue tracking it, not a document.
+const noticeHtml = notice => marked.parseInline(notice.message ?? '')
+
 // GetSpecVersions returns newest first, so the head of the list is the latest.
 const latestVersion = computed(() => specVersions.value[0]?.version ?? '')
 
@@ -291,8 +323,8 @@ const saveLinkFailure = computed(() => {
   return {
     profile: saveLinks.value.profile,
     text: conflict
-      ? 'This port keeps its saves in its own folder and PortForge could not link that folder into the profile — something is already there. The game still runs.'
-      : `This port keeps its saves in its own folder and PortForge could not link that folder into the profile${reason ? `: ${reason}` : ''}. The game still runs.`,
+      ? 'This port keeps its saves outside the profile and PortForge could not link them into it — something is already there. The game still runs.'
+      : `This port keeps its saves outside the profile and PortForge could not link them into it${reason ? `: ${reason}` : ''}. The game still runs.`,
   }
 })
 
@@ -718,6 +750,20 @@ function formatDate(iso) {
 
         <!-- Right column -->
         <aside class="body-side">
+          <!-- Above Installation because a caveat about this release is meant to
+               be read before installing it, not found afterwards. -->
+          <div
+            v-for="(notice, i) in notices"
+            :key="i"
+            class="alert notice"
+            :class="notice.type === 'info' ? 'notice-info' : 'notice-warn'"
+          >
+            <span :class="notice.type === 'info' ? 'icon-info' : 'icon-warn'" aria-hidden="true" />
+            <div class="alert-body">
+              <p class="alert-text notice-text" v-html="noticeHtml(notice)" />
+            </div>
+          </div>
+
           <section class="card">
             <h2 class="eyebrow">Installation</h2>
 
@@ -1236,6 +1282,21 @@ function formatDate(iso) {
 }
 
 .alert-warn { border-color: var(--warn); align-items: center; }
+
+.notice {
+  align-items: center;
+  background: var(--panel);
+}
+
+.notice-warn { border-color: var(--warn); }
+.notice-info { border-color: var(--accent); }
+
+/* The last line of a notice carries no trailing gap: it is the whole card. */
+.notice-text {
+  margin: 0;
+
+  a { color: var(--accent-hi); }
+}
 
 .alert-body { min-width: 0; }
 

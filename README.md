@@ -60,7 +60,7 @@ Builds are unsigned. **macOS** will refuse to open the app the first time: right
 
 ### Or build from source
 
-You need [Go 1.25+](https://go.dev), [Node.js 18+](https://nodejs.org), and the [Wails CLI v2](https://wails.io/docs/gettingstarted/installation), plus the GTK and WebKitGTK development headers for your distribution.
+You need [Go 1.26+](https://go.dev), [Node.js 18+](https://nodejs.org), and the [Wails CLI v2](https://wails.io/docs/gettingstarted/installation), plus the GTK and WebKitGTK development headers for your distribution.
 
 ```bash
 go install github.com/wailsapp/wails/v2/cmd/wails@latest
@@ -197,8 +197,9 @@ Profiles live at `MediaItem/profiles/<profile>/` in the configuration directory,
 the storage-unit list, and inside one a port's data is at
 `MediaItems/VideoGameFanPort/<port>/`. A port that takes a flag for its save location
 receives that folder at launch (`${profilePath}` in its spec); one that keeps its saves
-beside itself has those paths (`userDataPaths`) linked into the same folder, so the game
-writes where it always did and the data lands in the profile. Both are described in
+beside itself, or in a per-user folder such as `~/.local/share/<name>`, has those places
+(`userDataPaths`) linked into the same folder, so the game writes where it always did
+and the data lands in the profile. Both are described in
 [`docs/build-system.md`](docs/build-system.md). Data is never merged: if a path holds
 data on both sides, PortForge leaves both alone and says so on the game page.
 
