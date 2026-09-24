@@ -104,6 +104,8 @@ github.com/zamiba/config-forge v0.0.1 h1:6ly9tLM5pk5VfMD2Iu+MpGsRrgSQy12ZxRgdicD
 github.com/zamiba/config-forge v0.0.1/go.mod h1:3rbpLQMYYqFEUnJm3Gf7ShEek8VIUC2/aJjI0fwR4KY=
 github.com/zamiba/config-forge v0.0.2 h1:FbAOw3DrFajPT1NBLwUWNWxFZsgdh6HgHtgf23Jk454=
 github.com/zamiba/config-forge v0.0.2/go.mod h1:3rbpLQMYYqFEUnJm3Gf7ShEek8VIUC2/aJjI0fwR4KY=
+github.com/zamiba/config-forge v0.0.3 h1:AqF3V0Py+/m+8ORI9GaQ52MntUoxVEK6okGJ4tJCAkc=
+github.com/zamiba/config-forge v0.0.3/go.mod h1:3rbpLQMYYqFEUnJm3Gf7ShEek8VIUC2/aJjI0fwR4KY=
 github.com/zamiba/forge v0.0.10-alpha h1:dvsA2eug7ABYEItGYw0fitcA3E9p+S37kCfWIh2mr8M=
 github.com/zamiba/forge v0.0.10-alpha/go.mod h1:KkssMxSgfICicjLBOnH1m+2sPW9OqWG+IUgqYkpl3xE=
 github.com/zamiba/go-mediaitems v0.2.0 h1:dZMSPNcfI/Vpx8Zh+a7tOI1P9C62G2idC5c+2rL0gy8=

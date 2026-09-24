@@ -2,6 +2,32 @@
 
 All notable changes to PortForge are recorded here.
 
+## v0.3.5-alpha — 2026-09-24
+
+### Added
+
+**A game's own settings can be edited from PortForge, in the profile they belong to.** A
+port whose settings PortForge knows how to describe gets a Config tab beside Overview,
+Mods and Options, listing its config files down one side and their settings the way the
+game itself groups them: toggles, dropdowns, radio groups, sliders, text and paths, each
+with the range or the choices the game actually accepts. Edits batch across every file and
+one Save writes them, into the active profile's copy rather than a shared one, so two
+people on the same machine keep separate graphics settings for the same install. PortForge
+writes only the values listed on the page and leaves the rest of each file exactly as the
+game wrote it — comments, key order, unknown entries and all — because the game is the
+file's real author and rewriting it wholesale would lose everything the page does not
+model. A game that is running owns its config, so editing pauses while it is up and the
+files are read again when it quits; if the game changed a value in the meantime the row
+says so. A setting the game has not written yet is still editable where PortForge knows
+the game's own default for it, and each one can be put back to that default.
+
+**Config editing is [config-forge](https://github.com/zamiba/config-forge) v0.0.3.** It
+reads and writes the values inside a config file rather than the file itself, which is what
+lets PortForge leave the rest of the file alone. It now covers four config grammars rather
+than two, so the tab reaches most of the catalog instead of a couple of games. Keeping it a
+separate module means anything else built on the suite gets the same editing, and the same
+refusals, without reimplementing a grammar.
+
 ## v0.3.4-alpha — 2026-09-23
 
 ### Added
