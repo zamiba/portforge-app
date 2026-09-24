@@ -11,6 +11,7 @@ import (
 	"portforge/models"
 	"strings"
 
+	"github.com/zamiba/config-forge/schema"
 	"github.com/zamiba/forge/engine"
 )
 
@@ -341,6 +342,27 @@ func LoadSpecFile(baseDir, itemTitle string) (*engine.SpecFile, error) {
 		return nil, fmt.Errorf("%s: %w", SpecFileName, err)
 	}
 	return file, nil
+}
+
+// ConfigSchemaDir holds a port's config schemas, one JSON file per config file
+// the program keeps. A folder rather than a single file, following .artwork/:
+// several ports keep four or five configs, and one that grows a second should
+// mean dropping a file in rather than restructuring the first.
+var ConfigSchemaDir = ".configs"
+
+// LoadConfigSchemas reads a VideoGameVersion's config schemas, ordered as a page
+// should show them. A port with no editable config has none, which is the
+// ordinary case and not an error.
+//
+// Each schema's Path is authoritative: the filename inside the folder is a label
+// for whoever is reading the catalog, and nothing resolves against it.
+func LoadConfigSchemas(baseDir, itemTitle string) ([]schema.File, error) {
+	dir := filepath.Join(baseDir, PortItemType, itemTitle, ConfigSchemaDir)
+	files, err := schema.LoadDir(dir)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", ConfigSchemaDir, err)
+	}
+	return files, nil
 }
 
 // LoadInstallationSpecs reads the builds a VideoGameVersion declares.

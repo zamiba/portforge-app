@@ -13,17 +13,23 @@ export function CancelInstall():Promise<void>;
 
 export function CheckMediaItemsUpdate():Promise<boolean>;
 
+export function ChooseConfigPath(arg1:boolean,arg2:string):Promise<string>;
+
 export function CleanBuildDir(arg1:string):Promise<void>;
 
 export function CreateProfile(arg1:string):Promise<main.ProfileInfo>;
 
 export function DeleteProfile(arg1:string):Promise<void>;
 
+export function FillConfigDefaults(arg1:string):Promise<void>;
+
 export function GetActiveInstall():Promise<string>;
 
 export function GetCatalogActivity():Promise<main.CatalogActivity>;
 
 export function GetCatalogInfo():Promise<main.CatalogInfo>;
+
+export function GetGameConfig(arg1:string):Promise<main.GameConfig>;
 
 export function GetGames():Promise<Array<models.VideoGame>>;
 
@@ -88,6 +94,8 @@ export function RenameStorageUnit(arg1:string,arg2:string):Promise<void>;
 export function ReorderStorageUnits(arg1:Array<string>):Promise<void>;
 
 export function RevealSaves(arg1:string):Promise<void>;
+
+export function SaveGameConfig(arg1:string,arg2:Array<main.ConfigChange>):Promise<void>;
 
 export function SelectROMFiles():Promise<Array<string>>;
 

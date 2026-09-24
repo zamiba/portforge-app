@@ -57,6 +57,212 @@ export namespace main {
 	        this.devMode = source["devMode"];
 	    }
 	}
+	export class ConfigChange {
+	    file: string;
+	    pointer: string;
+	    value: number[];
+	
+	    static createFrom(source: any = {}) {
+	        return new ConfigChange(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.file = source["file"];
+	        this.pointer = source["pointer"];
+	        this.value = source["value"];
+	    }
+	}
+	export class ConfigOption {
+	    label: string;
+	    value: any;
+	
+	    static createFrom(source: any = {}) {
+	        return new ConfigOption(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.label = source["label"];
+	        this.value = source["value"];
+	    }
+	}
+	export class ConfigField {
+	    pointer: string;
+	    label: string;
+	    help?: string;
+	    widget?: string;
+	    kind: string;
+	    value?: any;
+	    display: string;
+	    editable: boolean;
+	    readOnly?: boolean;
+	    unset?: boolean;
+	    reason?: string;
+	    options?: ConfigOption[];
+	    min?: number;
+	    max?: number;
+	    step?: number;
+	    unit?: string;
+	    on?: any;
+	    off?: any;
+	    default?: any;
+	
+	    static createFrom(source: any = {}) {
+	        return new ConfigField(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.pointer = source["pointer"];
+	        this.label = source["label"];
+	        this.help = source["help"];
+	        this.widget = source["widget"];
+	        this.kind = source["kind"];
+	        this.value = source["value"];
+	        this.display = source["display"];
+	        this.editable = source["editable"];
+	        this.readOnly = source["readOnly"];
+	        this.unset = source["unset"];
+	        this.reason = source["reason"];
+	        this.options = this.convertValues(source["options"], ConfigOption);
+	        this.min = source["min"];
+	        this.max = source["max"];
+	        this.step = source["step"];
+	        this.unit = source["unit"];
+	        this.on = source["on"];
+	        this.off = source["off"];
+	        this.default = source["default"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class ConfigSection {
+	    title: string;
+	    help?: string;
+	    fields: ConfigField[];
+	
+	    static createFrom(source: any = {}) {
+	        return new ConfigSection(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.title = source["title"];
+	        this.help = source["help"];
+	        this.fields = this.convertValues(source["fields"], ConfigField);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class ConfigFile {
+	    title: string;
+	    path: string;
+	    exists: boolean;
+	    sections: ConfigSection[];
+	
+	    static createFrom(source: any = {}) {
+	        return new ConfigFile(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.title = source["title"];
+	        this.path = source["path"];
+	        this.exists = source["exists"];
+	        this.sections = this.convertValues(source["sections"], ConfigSection);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	
+	
+	export class GameConfig {
+	    profile: string;
+	    slug: string;
+	    state: string;
+	    running?: string;
+	    files: ConfigFile[];
+	
+	    static createFrom(source: any = {}) {
+	        return new GameConfig(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.profile = source["profile"];
+	        this.slug = source["slug"];
+	        this.state = source["state"];
+	        this.running = source["running"];
+	        this.files = this.convertValues(source["files"], ConfigFile);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class LibraryStorage {
 	    path: string;
 	    available: boolean;
@@ -416,6 +622,22 @@ export namespace models {
 	        this.description = source["description"];
 	    }
 	}
+	export class Notice {
+	    type: string;
+	    affectedPlatforms?: string[];
+	    message: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new Notice(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.type = source["type"];
+	        this.affectedPlatforms = source["affectedPlatforms"];
+	        this.message = source["message"];
+	    }
+	}
 	export class ParentItemType {
 	    title: string;
 	    schemaVersion: string;
@@ -679,22 +901,6 @@ export namespace models {
 	
 	
 	
-	export class Notice {
-	    type: string;
-	    affectedPlatforms?: string[];
-	    message: string;
-	
-	    static createFrom(source: any = {}) {
-	        return new Notice(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.type = source["type"];
-	        this.affectedPlatforms = source["affectedPlatforms"];
-	        this.message = source["message"];
-	    }
-	}
 	export class SoftwareVersion {
 	    _itemType: string;
 	    title: string;

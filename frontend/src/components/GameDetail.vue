@@ -6,11 +6,12 @@ import {
   GetROMStatus, GetInstallState, GetInstallPrompts,
   GetSpecVersions, GetInstallSize, LaunchVersion, CleanBuildDir, UninstallVersion,
   GetItemUpdate, UpdateMediaItem, SelectROMFiles, AddROMFiles,
-  GetSaveLinks, RevealSaves, GetVersionNotices,
+  GetSaveLinks, RevealSaves, GetVersionNotices, GetGameConfig,
 } from '../../wailsjs/go/main/App'
 import { artworkUrl, ART_WIDTH } from '../lib/artwork'
 import { useRomRequirements } from '../composables/useRomRequirements'
 import RomRequirements from './RomRequirements.vue'
+import ConfigTab from './ConfigTab.vue'
 import ThemeToggle from './ThemeToggle.vue'
 
 const props = defineProps({
@@ -185,6 +186,32 @@ const releaseNotesHtml = computed(() =>
 // would be built for. Resolved in Go rather than here: which types and platform
 // tokens a notice applies to is policy, and an app meeting a catalog newer than
 // itself has to show a notice it does not recognise rather than drop it.
+// The Config tab exists only for a port the catalog describes a config file for,
+// so the tab is absent rather than empty. The component does the reading; this is
+// just enough to know whether to offer it.
+const configTab = ref(null)
+const hasConfig = ref(false)
+
+watch(() => props.game._itemTitle, async itemTitle => {
+  hasConfig.value = false
+  try {
+    const c = await GetGameConfig(itemTitle)
+    hasConfig.value = (c.files?.length ?? 0) > 0
+  } catch (err) {
+    console.error('config:', err)
+  }
+}, { immediate: true })
+
+// Leaving the Config tab with unsaved edits asks first. Every other tab change is
+// immediate, and switching files inside Config is not leaving.
+function goTab(next) {
+  if (tab.value === 'config' && next !== 'config' && configTab.value) {
+    configTab.value.requestLeave(() => { tab.value = next })
+    return
+  }
+  tab.value = next
+}
+
 const notices = ref([])
 let noticesRequest = 0
 
@@ -594,16 +621,22 @@ function formatDate(iso) {
 
       <!-- Tabs -->
       <nav class="tabs">
-        <button class="tab" :class="{ active: tab === 'overview' }" @click="tab = 'overview'">Overview</button>
+        <button class="tab" :class="{ active: tab === 'overview' }" @click="goTab('overview')">Overview</button>
         <button
           v-if="installPrompts.length"
           class="tab"
           :class="{ active: tab === 'options' }"
-          @click="tab = 'options'"
+          @click="goTab('options')"
         >Options</button>
+        <button
+          v-if="hasConfig"
+          class="tab"
+          :class="{ active: tab === 'config' }"
+          @click="goTab('config')"
+        >Config</button>
       </nav>
 
-      <div class="body">
+      <div class="body" :class="{ 'body-wide': tab === 'config' }">
         <div class="body-main">
           <!-- Install progress and failure both belong at the top of the page:
                they are what the user came back to check. -->
@@ -746,10 +779,13 @@ function formatDate(iso) {
               </div>
             </section>
           </template>
+
+          <ConfigTab v-else-if="tab === 'config'" ref="configTab" :game="game" />
         </div>
 
-        <!-- Right column -->
-        <aside class="body-side">
+        <!-- Right column. Hidden on the Config tab, which carries its own rail and
+             needs the width; Installation is a tab away rather than gone. -->
+        <aside v-if="tab !== 'config'" class="body-side">
           <!-- Above Installation because a caveat about this release is meant to
                be read before installing it, not found afterwards. -->
           <div
@@ -1139,6 +1175,9 @@ function formatDate(iso) {
   gap: 30px;
   align-items: start;
   padding: 26px 32px 44px;
+
+  /* The Config tab has no right column, so the content takes the width. */
+  &.body-wide { grid-template-columns: minmax(0, 1fr); }
 }
 
 @media (max-width: 1100px) {

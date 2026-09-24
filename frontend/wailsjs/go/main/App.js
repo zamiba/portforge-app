@@ -18,6 +18,10 @@ export function CheckMediaItemsUpdate() {
   return window['go']['main']['App']['CheckMediaItemsUpdate']();
 }
 
+export function ChooseConfigPath(arg1, arg2) {
+  return window['go']['main']['App']['ChooseConfigPath'](arg1, arg2);
+}
+
 export function CleanBuildDir(arg1) {
   return window['go']['main']['App']['CleanBuildDir'](arg1);
 }
@@ -30,6 +34,10 @@ export function DeleteProfile(arg1) {
   return window['go']['main']['App']['DeleteProfile'](arg1);
 }
 
+export function FillConfigDefaults(arg1) {
+  return window['go']['main']['App']['FillConfigDefaults'](arg1);
+}
+
 export function GetActiveInstall() {
   return window['go']['main']['App']['GetActiveInstall']();
 }
@@ -40,6 +48,10 @@ export function GetCatalogActivity() {
 
 export function GetCatalogInfo() {
   return window['go']['main']['App']['GetCatalogInfo']();
+}
+
+export function GetGameConfig(arg1) {
+  return window['go']['main']['App']['GetGameConfig'](arg1);
 }
 
 export function GetGames() {
@@ -168,6 +180,10 @@ export function ReorderStorageUnits(arg1) {
 
 export function RevealSaves(arg1) {
   return window['go']['main']['App']['RevealSaves'](arg1);
+}
+
+export function SaveGameConfig(arg1, arg2) {
+  return window['go']['main']['App']['SaveGameConfig'](arg1, arg2);
 }
 
 export function SelectROMFiles() {
