@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"portforge/metadata"
 
@@ -87,7 +88,18 @@ type ConfigFile struct {
 	Path  string `json:"path"`
 	// Exists is false when the game has not written the file yet, in which case
 	// every field is unavailable and the page says so once rather than per field.
-	Exists   bool            `json:"exists"`
+	Exists bool `json:"exists"`
+
+	// FromReference is a file the game has not written, whose settings are shown
+	// from the catalog's reference copy of it. Every one of them is editable, and
+	// saving creates the file; nothing in it is recorded yet.
+	FromReference bool `json:"fromReference,omitempty"`
+
+	// Empty is a file that exists and has nothing this release can edit — every
+	// setting the schema names is absent in a way PortForge cannot put right, or
+	// stored differently than the schema expects. The page says that once about
+	// the file rather than listing settings nobody can touch.
+	Empty    bool            `json:"empty,omitempty"`
 	Sections []ConfigSection `json:"sections"`
 }
 
@@ -136,36 +148,121 @@ func (a *App) GetGameConfig(itemTitle string) (GameConfig, error) {
 		out.State, out.Running = configRunning, itemTitle
 	}
 
-	versionDir := filepath.Join(a.dataPath, metadata.PortItemType, itemTitle)
 	version, versions := a.installedVersion(itemTitle), a.declaredVersions(itemTitle)
 
 	missing := 0
 	for _, f := range files {
 		cf := ConfigFile{Title: f.Title, Path: f.Path}
-		doc, err := configfile.Open(filepath.Join(versionDir, filepath.FromSlash(f.Path)), f.Format)
+		ref := a.configReference(itemTitle, version, versions, f)
+		doc, err := configfile.Open(a.configFilePath(itemTitle, f.Path), f.Format)
 		if err != nil {
-			// A file the game has not written yet is the ordinary case. Anything
-			// else is reported the same way, because the page's answer is the
-			// same: these settings cannot be edited yet.
 			if !os.IsNotExist(err) {
 				log.Printf("config: %s: %s: %v", itemTitle, f.Path, err)
 			}
+			if ref != nil {
+				// The game has not written this file, but the catalog ships a
+				// reference copy of it, so every setting can be shown at the value
+				// the game itself would use and edited from there. Saving writes the
+				// file. Nothing is recorded yet, which is what Unset says.
+				cf.FromReference = true
+				cf.Sections = configSections(itemTitle, ref, ref, f, version, versions)
+				markUnrecorded(cf.Sections)
+				cf.Empty = len(cf.Sections) == 0
+				out.Files = append(out.Files, cf)
+				continue
+			}
+			// No reference either, so there is nothing to show but the shape of
+			// what one launch would produce.
 			missing++
-			cf.Sections = configSections(nil, f, version, versions)
+			cf.Sections = configSections(itemTitle, nil, nil, f, version, versions)
 			out.Files = append(out.Files, cf)
 			continue
 		}
 		cf.Exists = true
-		cf.Sections = configSections(doc, f, version, versions)
+		cf.Sections = configSections(itemTitle, doc, ref, f, version, versions)
+		cf.Empty = len(cf.Sections) == 0
 		out.Files = append(out.Files, cf)
 	}
 
-	// Every file missing means the game has never run. One file missing out of
-	// several is not that, and its fields carry their own reason.
+	// Every file missing, with no reference copy to stand in for any of them, means
+	// the game has never run and there is nothing to offer until it has.
 	if missing == len(out.Files) && out.State == configNormal {
 		out.State = configNeverLaunched
 	}
 	return out, nil
+}
+
+// configReference opens the reference copy of a config file, if the catalog ships
+// one. It is what makes a section the program has not written addable, and what a
+// config file the program has never created is seeded from.
+//
+// A reference that does not parse as the format its schema declares is not usable
+// and is reported rather than half-applied: the whole point of it is to be a
+// faithful copy of what the program writes, and one that is not even the right
+// grammar is not that.
+// configReference opens the copy of a config file the schema names for this release,
+// if it names one.
+//
+// There is no longer a second tier here. The old rule guessed from a filename whether
+// a copy was safe to write out whole; the schema now states which releases each copy
+// is right for, so a copy that applies to the installed release is one the catalog
+// has vouched for and may be both completed from and written out whole. A copy that
+// does not parse as the grammar its schema declares is not a faithful copy of
+// anything, and is reported rather than half-used.
+func (a *App) configReference(itemTitle, version string, versions []string, f schema.File) configfile.Doc {
+	data, err := metadata.ConfigReference(a.metadataPath, itemTitle, version, versions, f)
+	if err != nil {
+		log.Printf("config: %s: %v", itemTitle, err)
+		return nil
+	}
+	if data == nil {
+		return nil
+	}
+	ref, err := configfile.Parse(data, f.Format)
+	if err != nil {
+		log.Printf("config: %s: %s: the reference copy is not valid %s: %v",
+			itemTitle, f.Path, f.Format, err)
+		return nil
+	}
+	return ref
+}
+
+// configFilePath locates a config file the schema names. The path is spelled as
+// the program's own declaration spells it, and the same string reaches the file
+// two different ways.
+//
+// Every config file a port keeps ends up in the active profile: saveLinks puts
+// the real bytes at the profile's item folder and leaves a link behind wherever
+// the port expects them, and a port that takes a save-location flag is handed
+// that same folder as ${profilePath} and writes straight into it. So the
+// profile's copy is the one place every one of them lives, whichever mechanism
+// put it there — which is why a schema needs no location type of its own.
+//
+// The port's own folder is still tried first, and still matters: it is where the
+// file is when the port's data is not linked at all, either because save linking
+// hit a conflict or because the path was never declared as user data. Resolving
+// only against the profile would report such a file as one the game has not
+// written yet, while it sat in the port's folder the whole time.
+func (a *App) configFilePath(itemTitle, rel string) string {
+	inPort := filepath.Join(a.dataPath, metadata.PortItemType, itemTitle, filepath.FromSlash(rel))
+	if _, err := os.Lstat(inPort); err == nil {
+		return inPort
+	}
+	p, err := a.activeProfile()
+	if err != nil {
+		return inPort
+	}
+	itemDir, err := p.ItemDir(metadata.PortItemType, itemTitle)
+	if err != nil {
+		return inPort
+	}
+	inProfile := filepath.Join(itemDir, filepath.FromSlash(rel))
+	if _, err := os.Lstat(inProfile); err == nil {
+		return inProfile
+	}
+	// Neither is there. The port's own folder is the better thing to name in a
+	// log or an error, since that is where the program would create it.
+	return inPort
 }
 
 // declaredVersions returns the port's releases oldest first, which is the order
@@ -187,21 +284,58 @@ func (a *App) declaredVersions(itemTitle string) []string {
 	return out
 }
 
-// configSections resolves one schema against its file. A nil doc is a file that
-// is not there, and every field comes back unavailable with its reason.
-func configSections(doc configfile.Doc, f schema.File, version string, versions []string) []ConfigSection {
-	if doc == nil {
+// configSections resolves one schema against its file and keeps the settings the
+// page can actually offer.
+//
+// A setting this release cannot edit is left out rather than shown greyed: a row
+// nobody can act on is noise, and the reasons are not a person's problem to solve
+// — a schema naming a setting the release stores differently, or whose section the
+// game has not written, is not something anyone can fix from the page. What is
+// dropped is logged instead, because a schema drifting away from its program is
+// worth knowing about and a silent page would be the only sign.
+//
+// The exception is a file the game has not written at all. That is temporary and
+// one launch fixes it, so every setting is listed with no value and the page's own
+// banner explains it once. nil doc is that case.
+func configSections(itemTitle string, doc, ref configfile.Doc, f schema.File, version string, versions []string) []ConfigSection {
+	neverWritten := doc == nil
+	if neverWritten {
 		doc = configfile.Empty()
 	}
 	var out []ConfigSection
-	for _, sec := range schema.Resolve(doc, f, version, versions) {
+	var dropped []string
+	for _, sec := range schema.ResolveWith(doc, ref, f, version, versions) {
 		cs := ConfigSection{Title: sec.Title, Help: sec.Help}
 		for _, st := range sec.Fields {
+			if !neverWritten && !st.Editable && !st.ReadOnly {
+				dropped = append(dropped, fmt.Sprintf("%s (%s)", st.Pointer, st.Reason))
+				continue
+			}
 			cs.Fields = append(cs.Fields, configField(st))
 		}
-		out = append(out, cs)
+		// A section whose every setting was dropped is not a heading worth drawing.
+		if len(cs.Fields) > 0 {
+			out = append(out, cs)
+		}
+	}
+	if len(dropped) > 0 {
+		log.Printf("config: %s: %s: not offered: %s", itemTitle, f.Path, strings.Join(dropped, ", "))
 	}
 	return out
+}
+
+// markUnrecorded marks every field as holding a value the game has not recorded.
+// It is for a file resolved against the catalog's reference copy: each value is one
+// the game would use, and none of it is in a file yet, which is exactly what Unset
+// means everywhere else on the page.
+func markUnrecorded(sections []ConfigSection) {
+	for i := range sections {
+		for j := range sections[i].Fields {
+			if sections[i].Fields[j].Editable {
+				sections[i].Fields[j].Unset = true
+			}
+		}
+	}
 }
 
 func configField(st schema.FieldState) ConfigField {
@@ -301,21 +435,25 @@ func (a *App) SaveGameConfig(itemTitle string, changes []ConfigChange) error {
 	}
 	sort.Strings(paths)
 
-	versionDir := filepath.Join(a.dataPath, metadata.PortItemType, itemTitle)
 	version, versions := a.installedVersion(itemTitle), a.declaredVersions(itemTitle)
 
 	for _, rel := range paths {
 		f := byPath[rel]
-		full := filepath.Join(versionDir, filepath.FromSlash(rel))
-		doc, err := configfile.Open(full, f.Format)
+		full := a.configFilePath(itemTitle, rel)
+		ref := a.configReference(itemTitle, version, versions, f)
+		doc, _, err := a.openOrSeed(full, f, ref)
 		if err != nil {
 			return fmt.Errorf("%s: %w", rel, err)
 		}
 
-		// Which settings the game has not written, before anything is changed.
-		// Resolve answers for this release only, so a setting that does not belong
-		// to the installed version is not written into its file.
-		unwritten := unsetFields(doc, f, version, versions)
+		// Every setting the file does not hold yet, at the value the game itself
+		// uses, before any edit is applied. It has to be this way round: an edit to a
+		// setting whose section the game has not written cannot be written until the
+		// section is there, and this is what puts it there. A setting the person
+		// edited is then overwritten by their value below.
+		if _, err := schema.Complete(doc, refOrEmpty(ref), f, version, versions); err != nil {
+			return fmt.Errorf("%s: %w", rel, err)
+		}
 
 		fields := fieldsByPointer(f)
 		for _, c := range grouped[rel] {
@@ -330,16 +468,6 @@ func (a *App) SaveGameConfig(itemTitle string, changes []ConfigChange) error {
 			if err := schema.WriteField(doc, fl, v); err != nil {
 				return fmt.Errorf("%s: %w", rel, err)
 			}
-			delete(unwritten, c.Pointer)
-		}
-
-		// Write the rest at the value the game already uses. A setting the game
-		// built in is the game's, not PortForge's invention, and recording it
-		// changes nothing about how the game behaves — it is the same value the
-		// game falls back to — while leaving the file complete and every setting
-		// visible to anyone reading it.
-		if err := fillUnset(doc, unwritten); err != nil {
-			return fmt.Errorf("%s: %w", rel, err)
 		}
 
 		if err := writeConfigFile(full, doc.Bytes()); err != nil {
@@ -363,26 +491,29 @@ func (a *App) FillConfigDefaults(itemTitle string) error {
 	if err != nil {
 		return err
 	}
-	versionDir := filepath.Join(a.dataPath, metadata.PortItemType, itemTitle)
 	version, versions := a.installedVersion(itemTitle), a.declaredVersions(itemTitle)
 
 	for _, f := range files {
-		full := filepath.Join(versionDir, filepath.FromSlash(f.Path))
-		doc, err := configfile.Open(full, f.Format)
+		full := a.configFilePath(itemTitle, f.Path)
+		ref := a.configReference(itemTitle, version, versions, f)
+		doc, seeded, err := a.openOrSeed(full, f, ref)
 		if err != nil {
-			// A file the game has not created cannot be completed: PortForge does
-			// not author the file itself, only settings inside one.
+			// A file the game has not created and the catalog cannot stand in for
+			// is one PortForge will not author: it writes settings inside a config,
+			// never a config out of nothing.
 			if os.IsNotExist(err) {
 				continue
 			}
 			return fmt.Errorf("%s: %w", f.Path, err)
 		}
-		unwritten := unsetFields(doc, f, version, versions)
-		if len(unwritten) == 0 {
-			continue
-		}
-		if err := fillUnset(doc, unwritten); err != nil {
+		n, err := schema.Complete(doc, refOrEmpty(ref), f, version, versions)
+		if err != nil {
 			return fmt.Errorf("%s: %w", f.Path, err)
+		}
+		// A seeded file is complete already and still not on disk, so it is written
+		// even though Complete found nothing left to add.
+		if n == 0 && !seeded {
+			continue
 		}
 		if err := writeConfigFile(full, doc.Bytes()); err != nil {
 			return fmt.Errorf("%s: %w", f.Path, err)
@@ -391,34 +522,35 @@ func (a *App) FillConfigDefaults(itemTitle string) error {
 	return nil
 }
 
-// unsetFields are the schema's settings, applicable to this release, that the file
-// does not hold and that can be added to it.
-func unsetFields(doc configfile.Doc, f schema.File, version string, versions []string) map[string]schema.Field {
-	out := map[string]schema.Field{}
-	for _, sec := range schema.Resolve(doc, f, version, versions) {
-		for _, st := range sec.Fields {
-			if st.Unset {
-				out[st.Pointer] = st.Field
-			}
-		}
+// openOrSeed opens a config file, or starts one from the catalog's reference copy
+// when the program has not written it yet.
+//
+// Seeding is the one case where PortForge produces a whole config file, and what
+// makes it defensible is that it is not composing one: the bytes are the reference
+// copy's, authored from the program's own source as a faithful copy of what the
+// program writes. Without a reference the original refusal stands and the caller
+// gets the not-exist error to handle.
+func (a *App) openOrSeed(full string, f schema.File, ref configfile.Doc) (configfile.Doc, bool, error) {
+	doc, err := configfile.Open(full, f.Format)
+	if err == nil {
+		return doc, false, nil
 	}
-	return out
+	if !os.IsNotExist(err) || ref == nil {
+		return nil, false, err
+	}
+	doc, err = configfile.Parse(ref.Bytes(), f.Format)
+	return doc, err == nil, err
 }
 
-func fillUnset(doc configfile.Doc, fields map[string]schema.Field) error {
-	// Sorted so a file's new keys land in a stable order rather than a map's.
-	pointers := make([]string, 0, len(fields))
-	for p := range fields {
-		pointers = append(pointers, p)
+// refOrEmpty is the reference copy, or the document for a file that is not there.
+// Complete falls back to each field's own default where the reference says nothing,
+// so with no reference it behaves as it did before there were any: it fills the
+// settings whose section the program has already written, and leaves the rest.
+func refOrEmpty(ref configfile.Doc) configfile.Doc {
+	if ref == nil {
+		return configfile.Empty()
 	}
-	sort.Strings(pointers)
-	for _, p := range pointers {
-		fl := fields[p]
-		if err := schema.WriteField(doc, fl, fl.Default.V); err != nil {
-			return fmt.Errorf("%s: %w", p, err)
-		}
-	}
-	return nil
+	return ref
 }
 
 // installedVersion is the version recorded for the installed copy, or "" when the
@@ -491,6 +623,12 @@ func writeConfigFile(path string, data []byte) error {
 	mode := os.FileMode(0o644)
 	if info, err := os.Stat(target); err == nil {
 		mode = info.Mode().Perm()
+	} else if os.IsNotExist(err) {
+		// Starting a file the program has never written: its folder may not be there
+		// either, which is the ordinary case for a profile's copy of a config.
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			return err
+		}
 	}
 
 	tmp, err := os.CreateTemp(filepath.Dir(target), ".portforge-config-*")

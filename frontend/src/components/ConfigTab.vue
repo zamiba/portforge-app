@@ -33,7 +33,10 @@ const leaveCb = ref(null)
 
 const key = (file, pointer) => `${file}|${pointer}`
 
-async function load() {
+// afterSave is set when PortForge itself has just written the files. The re-read
+// then finds exactly the values it wrote, and attributing them to the game would
+// report every save as the game having been run.
+async function load({ afterSave = false } = {}) {
   loading.value = true
   try {
     const next = await GetGameConfig(props.game._itemTitle)
@@ -47,7 +50,7 @@ async function load() {
     }
     // A value that moved since the last read was moved by the game, not by us.
     const moved = {}
-    if (cfg.value) {
+    if (cfg.value && !afterSave) {
       for (const k of Object.keys(values)) {
         if (k in saved.value && String(saved.value[k]) !== String(values[k])) moved[k] = true
       }
@@ -210,6 +213,18 @@ const groups = computed(() => {
 
 const noResults = computed(() => filtering.value && groups.value.length === 0)
 
+// The selected file exists and holds nothing this release can edit. Said once
+// about the file, because listing settings nobody can act on is what the page is
+// for not doing.
+const fileEmpty = computed(() =>
+  !filtering.value && (files.value[fileIndex.value]?.empty ?? false))
+
+// The game has not written this file, and what is on screen comes from the
+// catalog's reference copy of it: every value is one the game itself would use, and
+// saving creates the file.
+const fromReference = computed(() =>
+  !filtering.value && (files.value[fileIndex.value]?.fromReference ?? false))
+
 // ── banners ────────────────────────────────────────────────────────────────
 const banner = computed(() => {
   const name = props.game.title || props.game._itemTitle
@@ -266,7 +281,7 @@ async function save() {
     await SaveGameConfig(props.game._itemTitle, changes)
     edits.value = {}
     failedFile.value = ''
-    await load()
+    await load({ afterSave: true })
     savedNote.value = `Saved to ${profile.value}'s profile`
     return true
   } catch (err) {
@@ -328,9 +343,6 @@ async function choosePath(file, fl) {
   }
 }
 
-const unavailableCopy = reason => reason === 'kindChanged'
-  ? 'A newer release of the game stores this differently, so PortForge leaves it alone.'
-  : 'Not in the file yet. The game writes this setting the first time it uses it.'
 </script>
 
 <template>
@@ -375,6 +387,19 @@ const unavailableCopy = reason => reason === 'kindChanged'
       <div class="cfg-content">
         <p v-if="noResults" class="cfg-empty">Nothing matches “{{ query }}”.</p>
 
+        <p v-if="fromReference && !fileEmpty" class="cfg-empty">
+          {{ game.title || game._itemTitle }} hasn't written this file yet. Every
+          setting below is the value it would use — saving writes the file to
+          {{ profile }}'s profile.
+        </p>
+
+        <p v-if="fileEmpty" class="cfg-empty">
+          Nothing in this file can be edited for the version of
+          {{ game.title || game._itemTitle }} that is installed. Its settings are
+          either stored differently in this release or not written yet in a way
+          PortForge can add to.
+        </p>
+
         <section v-for="(g, gi) in groups" :key="gi" class="cfg-section">
           <h3 v-if="g.heading" class="eyebrow cfg-group">{{ g.heading }}</h3>
           <h3 v-else class="eyebrow">{{ g.title }}</h3>
@@ -417,9 +442,6 @@ const unavailableCopy = reason => reason === 'kindChanged'
                   <span v-if="changedOnDisk[key(g.file.path, fl.pointer)]" class="cfg-pill">Changed by the game</span>
                 </span>
                 <span v-if="fl.help" class="cfg-help">{{ fl.help }}</span>
-                <span v-if="!fl.editable && !fl.readOnly && !neverLaunched" class="cfg-reason">
-                  {{ unavailableCopy(fl.reason) }}
-                </span>
                 <span v-if="invalidReason(g.file.path, fl)" class="cfg-invalid">
                   {{ invalidReason(g.file.path, fl) }}
                 </span>
@@ -435,8 +457,10 @@ const unavailableCopy = reason => reason === 'kindChanged'
               <!-- Read-only: the value, no control. -->
               <span v-if="fl.readOnly" class="cfg-ro mono">{{ fl.display || '—' }}</span>
 
-              <!-- Unavailable, or the game has never written the file. -->
-              <span v-else-if="!fl.editable" class="cfg-none">{{ neverLaunched ? '—' : "Can't edit" }}</span>
+              <!-- The game has not written this file yet, so there is no value to
+                   show and nothing to edit until it has. The page's banner says so
+                   once; every other setting on the page is editable by then. -->
+              <span v-else-if="!fl.editable" class="cfg-none">—</span>
 
               <template v-else>
                 <span
@@ -707,7 +731,11 @@ const unavailableCopy = reason => reason === 'kindChanged'
 .cfg-row-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
 .cfg-label { display: flex; align-items: center; gap: 7px; font-size: 13.5px; font-weight: 500; color: var(--text); }
 .cfg-help { font-size: 12.5px; line-height: 1.45; color: var(--dim2); }
-.cfg-reason { font-size: 12.5px; line-height: 1.45; color: var(--warn); }
+.cfg-empty {
+  margin: 0 0 18px; padding: 13px 15px; font-size: 13px; line-height: 1.5;
+  color: var(--dim); background: var(--panel); border: 1px solid var(--line);
+  border-radius: 12px;
+}
 .cfg-invalid { font-size: 12.5px; line-height: 1.45; color: var(--bad); }
 
 .cfg-dot-dirty { flex: 0 0 auto; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }

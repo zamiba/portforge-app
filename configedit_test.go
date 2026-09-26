@@ -4,9 +4,13 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"portforge/metadata"
+
+	"github.com/zamiba/config-forge/schema"
+	"github.com/zamiba/go-mediaitems-profiles/profile"
 )
 
 // newConfigApp lays out a port with a schema and, optionally, the config file the
@@ -37,7 +41,7 @@ func newConfigApp(t *testing.T, writeFile bool) *App {
 	    ]
 	  }]
 	}`
-	if err := os.WriteFile(filepath.Join(metaDir, "options.json"), []byte(sch), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(metaDir, "options.schema.json"), []byte(sch), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	// A spec, so the schema's path is declared user data and versions resolve.
@@ -69,19 +73,26 @@ func newConfigApp(t *testing.T, writeFile bool) *App {
 	return &App{metadataPath: meta, dataPath: data}
 }
 
-func fieldOf(t *testing.T, c GameConfig, pointer string) ConfigField {
-	t.Helper()
+func findField(c GameConfig, pointer string) (ConfigField, bool) {
 	for _, f := range c.Files {
 		for _, sec := range f.Sections {
 			for _, fl := range sec.Fields {
 				if fl.Pointer == pointer {
-					return fl
+					return fl, true
 				}
 			}
 		}
 	}
-	t.Fatalf("no field %s", pointer)
-	return ConfigField{}
+	return ConfigField{}, false
+}
+
+func fieldOf(t *testing.T, c GameConfig, pointer string) ConfigField {
+	t.Helper()
+	fl, ok := findField(c, pointer)
+	if !ok {
+		t.Fatalf("no field %s", pointer)
+	}
+	return fl
 }
 
 func TestGetGameConfigResolvesAgainstTheFile(t *testing.T) {
@@ -111,10 +122,11 @@ func TestGetGameConfigResolvesAgainstTheFile(t *testing.T) {
 		t.Errorf("unit = %q", u)
 	}
 
-	// A setting the file has lost is shown with a reason code, not a sentence.
-	gone := fieldOf(t, c, "gone")
-	if gone.Editable || gone.Reason != "missing" {
-		t.Errorf("gone = %+v", gone)
+	// A setting the file has lost is not offered at all. Nobody can act on a row
+	// that says a release stores something differently, so the page does not carry
+	// one; what was dropped goes to the log instead.
+	if _, found := findField(c, "gone"); found {
+		t.Error("a setting this release cannot edit should not reach the page")
 	}
 
 	// A read-only field carries its literal and is not editable.
@@ -460,7 +472,7 @@ func TestDeclaredVersionsAreOldestFirstAndBoundFields(t *testing.T) {
 	    { "pointer": "video.scale", "kind": "int", "widget": "number", "label": "Scale", "default": 3, "sinceVersion": "1.1 RC4" }
 	  ]}]
 	}`
-	if err := os.WriteFile(filepath.Join(dir, metadata.ConfigSchemaDir, "a.json"), []byte(sch), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, metadata.ConfigSchemaDir, "a.schema.json"), []byte(sch), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -503,3 +515,637 @@ func TestDeclaredVersionsAreOldestFirstAndBoundFields(t *testing.T) {
 }
 
 func quote(s string) string { return `"` + s + `"` }
+
+// A port that keeps its config outside its own folder — inside an OS data
+// directory, or written straight into the profile through ${profilePath} — has
+// nothing at the path under the port's folder. Its config file is still in the
+// profile, under the same relative path, because that is where saveLinks puts
+// the real bytes of every entry whatever its locationType.
+func TestConfigFilePathFallsBackToTheProfile(t *testing.T) {
+	app := newConfigApp(t, false)
+	item := "Gen1Recomp · 2026"
+
+	mgr, err := profile.New(profile.Options{Dir: filepath.Join(t.TempDir(), "profiles")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := mgr.Create("Sam", "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	app.profiles = mgr
+	app.prefs.ActiveProfile = p.Slug
+
+	inPort := filepath.Join(app.dataPath, metadata.PortItemType, item, "install", "options.lua")
+
+	// Nothing anywhere: the port's own folder is what gets named, since that is
+	// where the program would create the file.
+	if got := app.configFilePath(item, "install/options.lua"); got != inPort {
+		t.Errorf("with the file nowhere, got %q, want the port's folder %q", got, inPort)
+	}
+
+	// Only in the profile: that is the one that gets read.
+	itemDir, err := p.ItemDir(metadata.PortItemType, item)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inProfile := filepath.Join(itemDir, "install", "options.lua")
+	if err := os.MkdirAll(filepath.Dir(inProfile), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(inProfile, []byte("return {\n  musicVol = 4,\n}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := app.configFilePath(item, "install/options.lua"); got != inProfile {
+		t.Errorf("with the file only in the profile, got %q, want %q", got, inProfile)
+	}
+
+	// And it is genuinely readable through the whole page, not just resolvable.
+	cfg, err := app.GetGameConfig(item)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Files) != 1 || !cfg.Files[0].Exists {
+		t.Fatalf("the page did not find the profile's copy: %+v", cfg.Files)
+	}
+	if got := fieldOf(t, cfg, "musicVol").Display; got != "4" {
+		t.Errorf("musicVol = %s, want 4", got)
+	}
+
+	// The port's own folder still wins when the file is there — which is the case
+	// where the port's data was never linked, and resolving only against the
+	// profile would report a file that exists as one the game had not written.
+	if err := os.MkdirAll(filepath.Dir(inPort), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(inPort, []byte("return {\n  musicVol = 1,\n}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := app.configFilePath(item, "install/options.lua"); got != inPort {
+		t.Errorf("with the file in both, got %q, want the port's folder %q", got, inPort)
+	}
+}
+
+// A broken link counts as the file being there: Lstat sees the link itself, so a
+// port whose data is linked to a profile that has since gone is reported against
+// its own folder rather than being looked for somewhere it never was.
+func TestConfigFilePathNamesABrokenLink(t *testing.T) {
+	app := newConfigApp(t, false)
+	item := "Gen1Recomp · 2026"
+	inPort := filepath.Join(app.dataPath, metadata.PortItemType, item, "install", "options.lua")
+	if err := os.MkdirAll(filepath.Dir(inPort), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(t.TempDir(), "gone", "options.lua"), inPort); err != nil {
+		t.Skipf("symlinks unavailable here: %v", err)
+	}
+	if got := app.configFilePath(item, "install/options.lua"); got != inPort {
+		t.Errorf("got %q, want %q", got, inPort)
+	}
+}
+
+// A setting this release cannot edit is left out of the page rather than shown
+// greyed with a reason. A section that loses every setting goes with it, and a file
+// that loses every section says so once about the file.
+func TestGetGameConfigLeavesOutWhatCannotBeEdited(t *testing.T) {
+	meta, data := t.TempDir(), t.TempDir()
+	item := "Test Port · 2026"
+	metaDir := filepath.Join(meta, metadata.PortItemType, item, metadata.ConfigSchemaDir)
+	if err := os.MkdirAll(metaDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Three sections: one editable, one whose only setting the file stores as
+	// another kind, one whose only setting is absent with no default to add.
+	const sch = `{
+	  "title": "Settings",
+	  "path": "install/settings.cfg",
+	  "format": "godot",
+	  "sections": [
+	    { "title": "Video", "fields": [
+	      { "pointer": "video.mode", "kind": "int", "widget": "number", "label": "Mode" }
+	    ] },
+	    { "title": "Changed", "fields": [
+	      { "pointer": "video.vsync", "kind": "string", "widget": "text", "label": "V-sync" }
+	    ] },
+	    { "title": "Absent", "fields": [
+	      { "pointer": "video.hdr", "kind": "bool", "widget": "toggle", "label": "HDR" }
+	    ] }
+	  ]
+	}`
+	if err := os.WriteFile(filepath.Join(metaDir, "settings.schema.json"), []byte(sch), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	const spec = `{
+	  "userDataPaths": [{ "locationType": "runDir", "path": "install/settings.cfg" }],
+	  "builds": [{ "versions": ["1.0"], "targetPlatforms": ["Linux"], "steps": [] }]
+	}`
+	if err := os.WriteFile(filepath.Join(meta, metadata.PortItemType, item, ".forge.json"), []byte(spec), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(data, metadata.PortItemType, item, "install")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// vsync is an int here, and hdr is not in the file at all.
+	if err := os.WriteFile(filepath.Join(dir, "settings.cfg"),
+		[]byte("[video]\nmode=0\nvsync=1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	app := &App{metadataPath: meta, dataPath: data}
+	c, err := app.GetGameConfig(item)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.Files) != 1 || !c.Files[0].Exists || c.Files[0].Empty {
+		t.Fatalf("files = %+v", c.Files)
+	}
+	if _, ok := findField(c, "video.mode"); !ok {
+		t.Error("the editable setting should be on the page")
+	}
+	for _, p := range []string{"video.vsync", "video.hdr"} {
+		if _, ok := findField(c, p); ok {
+			t.Errorf("%s cannot be edited, so it should not be on the page", p)
+		}
+	}
+	// The two sections that lost their only setting are gone with it.
+	var titles []string
+	for _, sec := range c.Files[0].Sections {
+		titles = append(titles, sec.Title)
+	}
+	if strings.Join(titles, ",") != "Video" {
+		t.Errorf("sections = %v, want only Video", titles)
+	}
+}
+
+// A file that exists and holds nothing this release can edit is marked, so the page
+// can say that once rather than drawing an empty panel.
+func TestGetGameConfigMarksAFileWithNothingEditable(t *testing.T) {
+	meta, data := t.TempDir(), t.TempDir()
+	item := "Test Port · 2026"
+	metaDir := filepath.Join(meta, metadata.PortItemType, item, metadata.ConfigSchemaDir)
+	if err := os.MkdirAll(metaDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const sch = `{
+	  "title": "Settings",
+	  "path": "install/settings.cfg",
+	  "format": "godot",
+	  "sections": [{ "title": "Audio", "fields": [
+	    { "pointer": "audio.master", "kind": "string", "widget": "text", "label": "Master" }
+	  ] }]
+	}`
+	if err := os.WriteFile(filepath.Join(metaDir, "settings.schema.json"), []byte(sch), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	const spec = `{
+	  "userDataPaths": [{ "locationType": "runDir", "path": "install/settings.cfg" }],
+	  "builds": [{ "versions": ["1.0"], "targetPlatforms": ["Linux"], "steps": [] }]
+	}`
+	if err := os.WriteFile(filepath.Join(meta, metadata.PortItemType, item, ".forge.json"), []byte(spec), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(data, metadata.PortItemType, item, "install")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "settings.cfg"), []byte("[audio]\nmaster=10\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	app := &App{metadataPath: meta, dataPath: data}
+	c, err := app.GetGameConfig(item)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The file is there, so this is not the never-launched state — it is a schema
+	// that does not fit the release, which is a different thing to say.
+	if c.State != configNormal {
+		t.Errorf("state = %q, want normal", c.State)
+	}
+	if len(c.Files) != 1 || !c.Files[0].Exists || !c.Files[0].Empty {
+		t.Fatalf("files = %+v", c.Files)
+	}
+	if len(c.Files[0].Sections) != 0 {
+		t.Errorf("sections = %+v, want none", c.Files[0].Sections)
+	}
+}
+
+// The exception to the rule: a file the game has not written yet. That is
+// temporary, one launch fixes it, and the page's banner explains it once — so the
+// settings are listed with no value rather than hidden.
+func TestGetGameConfigStillListsSettingsBeforeTheFirstLaunch(t *testing.T) {
+	app := newConfigApp(t, false)
+	c, err := app.GetGameConfig("Gen1Recomp · 2026")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.State != configNeverLaunched {
+		t.Fatalf("state = %q, want neverLaunched", c.State)
+	}
+	// Every field of the schema is there, including the one with no default, so a
+	// person can see what they would get.
+	for _, p := range []string{"musicVol", "animations", "battleStyle", "gone"} {
+		fl, ok := findField(c, p)
+		if !ok {
+			t.Errorf("%s should be listed before the first launch", p)
+			continue
+		}
+		if fl.Editable {
+			t.Errorf("%s should not be editable yet", p)
+		}
+	}
+}
+
+// newReferenceApp lays out a port whose schema names a setting in a section the
+// game does not always write, plus the catalog's reference copy of that file.
+func newReferenceApp(t *testing.T, existing string, withReference bool) (*App, string) {
+	t.Helper()
+	// A schema names the copy it ships; without that declaration a file sitting in
+	// the folder is not a reference, which is the point of declaring it.
+	reference := ""
+	if withReference {
+		reference = `"reference": { "file": "settings.cfg.example" },`
+	}
+	meta, data := t.TempDir(), t.TempDir()
+	item := "Ref Port · 2026"
+	metaDir := filepath.Join(meta, metadata.PortItemType, item, metadata.ConfigSchemaDir)
+	if err := os.MkdirAll(metaDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sch := `{
+	  "title": "Settings",
+	  "path": "install/settings.cfg",
+	  "format": "godot",
+	  ` + reference + `
+	  "sections": [
+	    { "title": "Video", "fields": [
+	      { "pointer": "video.mode", "kind": "int", "widget": "number", "label": "Mode", "default": 0 }
+	    ] },
+	    { "title": "Editor", "fields": [
+	      { "pointer": "editor.autosave", "kind": "int", "widget": "number", "label": "Autosave", "default": 5 }
+	    ] }
+	  ]
+	}`
+	if err := os.WriteFile(filepath.Join(metaDir, "settings.schema.json"), []byte(sch), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if withReference {
+		// A complete copy of the file, as the game writes it.
+		const ref = "[video]\nmode=0\nvsync=1\n\n[editor]\nautosave=5\n"
+		if err := os.WriteFile(filepath.Join(metaDir, "settings.cfg.example"), []byte(ref), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	const spec = `{
+	  "userDataPaths": [{ "locationType": "runDir", "path": "install/settings.cfg" }],
+	  "builds": [{ "versions": ["1.0"], "targetPlatforms": ["Linux"], "steps": [] }]
+	}`
+	if err := os.WriteFile(filepath.Join(meta, metadata.PortItemType, item, ".forge.json"), []byte(spec), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if existing != "" {
+		dir := filepath.Join(data, metadata.PortItemType, item, "install")
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "settings.cfg"), []byte(existing), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return &App{metadataPath: meta, dataPath: data}, item
+}
+
+// A file the game has not written, with a reference copy behind it: every setting
+// is shown at the value the game would use and every one is editable, so this is no
+// longer the never-launched state.
+func TestGetGameConfigFallsBackToTheReference(t *testing.T) {
+	app, item := newReferenceApp(t, "", true)
+	c, err := app.GetGameConfig(item)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.State != configNormal {
+		t.Errorf("state = %q, want normal: the settings are editable", c.State)
+	}
+	if len(c.Files) != 1 || c.Files[0].Exists || !c.Files[0].FromReference {
+		t.Fatalf("files = %+v", c.Files)
+	}
+	for ptr, want := range map[string]string{"video.mode": "0", "editor.autosave": "5"} {
+		fl, ok := findField(c, ptr)
+		if !ok {
+			t.Errorf("%s: not on the page", ptr)
+			continue
+		}
+		if !fl.Editable {
+			t.Errorf("%s should be editable from the reference", ptr)
+		}
+		// Nothing is recorded yet, whatever the reference holds.
+		if !fl.Unset {
+			t.Errorf("%s should be marked as not yet recorded", ptr)
+		}
+		if fl.Display != want {
+			t.Errorf("%s = %q, want %q", ptr, fl.Display, want)
+		}
+	}
+}
+
+// Without a reference the old answer stands: nothing to offer until the game runs.
+func TestGetGameConfigWithoutAReferenceIsUnchanged(t *testing.T) {
+	app, item := newReferenceApp(t, "", false)
+	c, err := app.GetGameConfig(item)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.State != configNeverLaunched {
+		t.Errorf("state = %q, want neverLaunched", c.State)
+	}
+	if c.Files[0].FromReference {
+		t.Error("there is no reference copy to have come from")
+	}
+}
+
+// Saving a file the game has not written creates it from the reference, carrying the
+// person's edit — and the reference's own settings come with it, including the one
+// no field names.
+func TestSaveGameConfigSeedsFromTheReference(t *testing.T) {
+	app, item := newReferenceApp(t, "", true)
+	if err := app.SaveGameConfig(item, []ConfigChange{
+		{File: "install/settings.cfg", Pointer: "editor.autosave", Value: json.RawMessage(`9`)},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	out, err := os.ReadFile(filepath.Join(app.dataPath, metadata.PortItemType, item, "install", "settings.cfg"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	const want = "[video]\nmode=0\nvsync=1\n\n[editor]\nautosave=9\n"
+	if string(out) != want {
+		t.Errorf("got  %q\nwant %q", out, want)
+	}
+}
+
+// The case this was built for: the game has written the file but not the section a
+// setting lives in. The reference attests the section, so the setting is editable
+// and saving adds the section rather than guessing at it.
+func TestSaveGameConfigCompletesAMissingSection(t *testing.T) {
+	app, item := newReferenceApp(t, "[video]\nmode=2\n", true)
+
+	c, err := app.GetGameConfig(item)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fl, ok := findField(c, "editor.autosave")
+	if !ok {
+		t.Fatal("editor.autosave should be offered: the reference has the section")
+	}
+	if !fl.Editable || !fl.Unset {
+		t.Errorf("editor.autosave = %+v", fl)
+	}
+
+	if err := app.SaveGameConfig(item, []ConfigChange{
+		{File: "install/settings.cfg", Pointer: "editor.autosave", Value: json.RawMessage(`3`)},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	out, err := os.ReadFile(filepath.Join(app.dataPath, metadata.PortItemType, item, "install", "settings.cfg"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The game's own value for mode is kept, and the section is appended.
+	const want = "[video]\nmode=2\n\n[editor]\nautosave=3\n"
+	if string(out) != want {
+		t.Errorf("got  %q\nwant %q", out, want)
+	}
+}
+
+// Without a reference, a setting whose section is missing stays off the page and the
+// file is left alone — the refusal this whole feature is an exception to.
+func TestSaveGameConfigLeavesAMissingSectionAloneWithoutAReference(t *testing.T) {
+	app, item := newReferenceApp(t, "[video]\nmode=2\n", false)
+	c, err := app.GetGameConfig(item)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := findField(c, "editor.autosave"); ok {
+		t.Error("nothing attests the [editor] section, so the setting must not be offered")
+	}
+	if err := app.SaveGameConfig(item, []ConfigChange{
+		{File: "install/settings.cfg", Pointer: "video.mode", Value: json.RawMessage(`1`)},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	out, err := os.ReadFile(filepath.Join(app.dataPath, metadata.PortItemType, item, "install", "settings.cfg"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(out); got != "[video]\nmode=1\n" {
+		t.Errorf("got %q, want the section left alone", got)
+	}
+}
+
+// Fill defaults creates the file too, so someone can complete a port's configs
+// without editing anything first.
+func TestFillConfigDefaultsSeedsFromTheReference(t *testing.T) {
+	app, item := newReferenceApp(t, "", true)
+	if err := app.FillConfigDefaults(item); err != nil {
+		t.Fatal(err)
+	}
+	out, err := os.ReadFile(filepath.Join(app.dataPath, metadata.PortItemType, item, "install", "settings.cfg"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(out); got != "[video]\nmode=0\nvsync=1\n\n[editor]\nautosave=5\n" {
+		t.Errorf("got %q", got)
+	}
+	// And with no reference it still declines to author a file.
+	app2, item2 := newReferenceApp(t, "", false)
+	if err := app2.FillConfigDefaults(item2); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(app2.dataPath, metadata.PortItemType, item2, "install", "settings.cfg")); !os.IsNotExist(err) {
+		t.Error("PortForge should not author a config file with nothing to copy from")
+	}
+}
+
+// A reference copy that is not even the grammar its schema declares is not a
+// faithful copy of anything, so it is ignored and reported rather than half-used.
+//
+// The fixture is a Lua data file rather than a Godot one on purpose: Godot's
+// ConfigFile is deliberately lenient — a line it does not recognise is one it leaves
+// alone — so it would accept almost any text as an empty config. A grammar with a
+// required preamble is what makes "this is not that format" an answer at all.
+func TestConfigReferenceIgnoresAnUnparseableExample(t *testing.T) {
+	meta, data := t.TempDir(), t.TempDir()
+	item := "Lua Port · 2026"
+	metaDir := filepath.Join(meta, metadata.PortItemType, item, metadata.ConfigSchemaDir)
+	if err := os.MkdirAll(metaDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const sch = `{
+	  "title": "Options",
+	  "path": "install/options.lua",
+	  "format": "luaTable",
+	  "reference": { "file": "options.lua.example" },
+	  "sections": [{ "title": "Audio", "fields": [
+	    { "pointer": "volume", "kind": "int", "widget": "number", "label": "Volume", "default": 7 }
+	  ] }]
+	}`
+	if err := os.WriteFile(filepath.Join(metaDir, "options.schema.json"), []byte(sch), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	const spec = `{
+	  "userDataPaths": [{ "locationType": "runDir", "path": "install/options.lua" }],
+	  "builds": [{ "versions": ["1.0"], "targetPlatforms": ["Linux"], "steps": [] }]
+	}`
+	if err := os.WriteFile(filepath.Join(meta, metadata.PortItemType, item, ".forge.json"), []byte(spec), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// No `return`, so this is not a Lua data file whatever it is.
+	if err := os.WriteFile(filepath.Join(metaDir, "options.lua.example"),
+		[]byte("volume = 7\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	app := &App{metadataPath: meta, dataPath: data}
+	c, err := app.GetGameConfig(item)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Files[0].FromReference {
+		t.Error("an unparseable reference should not be used")
+	}
+	if c.State != configNeverLaunched {
+		t.Errorf("state = %q, want neverLaunched: there is no usable reference", c.State)
+	}
+
+	// And a valid one is used, which is what proves the test is testing the parse.
+	if err := os.WriteFile(filepath.Join(metaDir, "options.lua.example"),
+		[]byte("return {\n  volume = 7,\n}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c, err = app.GetGameConfig(item)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !c.Files[0].FromReference {
+		t.Error("a valid reference should be used")
+	}
+}
+
+// A copy sitting in the folder that no schema names is not a reference. The
+// declaration is what makes it one, which is the whole point of declaring it.
+func TestAnUndeclaredCopyIsNotAReference(t *testing.T) {
+	app, item := newReferenceApp(t, "", false)
+	metaDir := filepath.Join(app.metadataPath, metadata.PortItemType, item, metadata.ConfigSchemaDir)
+	if err := os.WriteFile(filepath.Join(metaDir, "settings.cfg.example"),
+		[]byte("[video]\nmode=0\n\n[editor]\nautosave=5\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c, err := app.GetGameConfig(item)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Files[0].FromReference {
+		t.Error("the schema does not name this copy, so it is not a reference")
+	}
+	if c.State != configNeverLaunched {
+		t.Errorf("state = %q, want neverLaunched", c.State)
+	}
+}
+
+// A schema that names a copy the catalog does not ship is a mistake worth reporting,
+// not something to treat as "no reference": somebody meant it to be there.
+func TestANamedCopyThatIsMissingIsReported(t *testing.T) {
+	app, item := newReferenceApp(t, "", true)
+	metaDir := filepath.Join(app.metadataPath, metadata.PortItemType, item, metadata.ConfigSchemaDir)
+	if err := os.Remove(filepath.Join(metaDir, "settings.cfg.example")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := metadata.ConfigReference(app.metadataPath, item, "1.0", []string{"1.0"},
+		schema.File{Path: "install/settings.cfg", Reference: schema.References{{File: "settings.cfg.example"}}}); err == nil {
+		t.Error("a named copy that is not there should be an error")
+	}
+	// The page still works; it just has no reference to lean on.
+	c, err := app.GetGameConfig(item)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Files[0].FromReference {
+		t.Error("there is no copy to have come from")
+	}
+}
+
+// A program whose config changes shape between releases names one copy per shape, and
+// the installed release decides which is used. Seeding 1.1's shape into 1.0.2 would
+// write sections 1.0.2 has never heard of, and its loader indexes file[section][key].
+func TestReferencePerReleasePicksTheRightShape(t *testing.T) {
+	meta, data := t.TempDir(), t.TempDir()
+	item := "Two Shapes · 2026"
+	metaDir := filepath.Join(meta, metadata.PortItemType, item, metadata.ConfigSchemaDir)
+	if err := os.MkdirAll(metaDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const sch = `{
+	  "title": "Settings",
+	  "path": "install/settings.cfg",
+	  "format": "godot",
+	  "reference": [
+	    { "file": "old.example", "untilVersion": "1.0" },
+	    { "file": "new.example", "sinceVersion": "2.0" }
+	  ],
+	  "sections": [
+	    { "title": "Video", "fields": [
+	      { "pointer": "video.mode", "kind": "int", "widget": "number", "label": "Mode", "default": 0 }
+	    ] },
+	    { "title": "Editor", "fields": [
+	      { "pointer": "editor.autosave", "kind": "int", "widget": "number", "label": "Autosave",
+	        "default": 5, "sinceVersion": "2.0" }
+	    ] }
+	  ]
+	}`
+	if err := os.WriteFile(filepath.Join(metaDir, "settings.schema.json"), []byte(sch), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(metaDir, "old.example"), []byte("[video]\nmode=0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(metaDir, "new.example"),
+		[]byte("[video]\nmode=0\n\n[editor]\nautosave=5\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	const spec = `{
+	  "userDataPaths": [{ "locationType": "runDir", "path": "install/settings.cfg" }],
+	  "builds": [{ "versions": ["1.0", "2.0"], "targetPlatforms": ["Linux"], "steps": [] }]
+	}`
+	if err := os.WriteFile(filepath.Join(meta, metadata.PortItemType, item, ".forge.json"), []byte(spec), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	for version, want := range map[string]string{
+		"1.0": "[video]\nmode=0\n",
+		"2.0": "[video]\nmode=0\n\n[editor]\nautosave=5\n",
+	} {
+		dir := filepath.Join(data, metadata.PortItemType, item)
+		if err := os.MkdirAll(filepath.Join(dir, ".state"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		state := `{"installed":true,"installedVersion":"` + version + `","targetPlatform":"Linux"}`
+		if err := os.WriteFile(filepath.Join(dir, ".state", "meta.json"), []byte(state), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		_ = os.Remove(filepath.Join(dir, "install", "settings.cfg"))
+
+		app := &App{metadataPath: meta, dataPath: data}
+		if err := app.FillConfigDefaults(item); err != nil {
+			t.Fatalf("%s: %v", version, err)
+		}
+		out, err := os.ReadFile(filepath.Join(dir, "install", "settings.cfg"))
+		if err != nil {
+			t.Fatalf("%s: %v", version, err)
+		}
+		if string(out) != want {
+			t.Errorf("%s: got %q, want %q", version, out, want)
+		}
+	}
+}

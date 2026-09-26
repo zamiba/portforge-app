@@ -365,6 +365,40 @@ func LoadConfigSchemas(baseDir, itemTitle string) ([]schema.File, error) {
 	return files, nil
 }
 
+// ConfigReference reads the copy of a config file that a schema names for a release,
+// if it names one for that release at all.
+//
+// The schema declares the copy — which file, and which releases it is right for —
+// rather than PortForge deriving a name from the config file's own. That is what
+// makes the relationship a statement instead of a coincidence: a schema can say it
+// deliberately has no reference, one copy can cover a range of releases, and a
+// program whose config changes shape between releases says so where somebody reading
+// the catalog will see it.
+//
+// A reference copy is a complete config, authored from the program's own source,
+// with every setting at the value the program itself uses. It is what lets PortForge
+// add a section the program has not written and start a config file the program has
+// never created — neither of which anything should do on a guess. No reference is the
+// ordinary case for a program that writes its whole config every time, and is not an
+// error.
+func ConfigReference(baseDir, itemTitle, version string, versions []string, f schema.File) ([]byte, error) {
+	ref, ok := f.ReferenceFor(version, versions)
+	if !ok {
+		return nil, nil
+	}
+	data, err := os.ReadFile(filepath.Join(baseDir, PortItemType, itemTitle, ConfigSchemaDir, ref.File))
+	if os.IsNotExist(err) {
+		// The schema names a copy the catalog does not ship. Worth reporting rather
+		// than treating as "no reference": somebody meant it to be there.
+		return nil, fmt.Errorf("%s names the reference copy %q, which is not in %s",
+			f.Path, ref.File, ConfigSchemaDir)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return data, nil
+}
+
 // LoadInstallationSpecs reads the builds a VideoGameVersion declares.
 // Returns nil (no error) if it has no spec file.
 func LoadInstallationSpecs(baseDir, itemTitle string) ([]engine.Spec, error) {

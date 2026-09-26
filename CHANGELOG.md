@@ -2,6 +2,65 @@
 
 All notable changes to PortForge are recorded here.
 
+## Unreleased
+
+### Added
+
+**A port that keeps its settings outside its own folder can have them edited too.**
+The Config tab used to look for a config file under the port's own folder, which is
+where most of them are — as a link the profile owns. Some ports keep theirs
+elsewhere: in one of the operating system's own data folders, or written straight
+into the profile by a port that takes a save-location flag. PortForge now looks in
+the profile as well, which is the one place every config file genuinely lives
+whichever of the three routes put it there, so those ports get a Config tab on the
+same terms as the rest. The port's own folder is still looked at first, and still
+matters: it is where the file is when a port's data is not linked to a profile at
+all, and reading only the profile would have reported a file that exists as one the
+game had not written yet.
+
+**Config editing covers two more kinds of settings file.** The grammars a port's
+settings can be written in now include TOML and the plain `key value` form a C
+program writes, which between them were the last thing standing between the catalog
+and a Config tab on every port in it.
+
+**A game's config files can be completed, so every setting it has is in them.** A
+game writes a section of its config only once something in it is touched, which left
+whole groups of settings with nowhere to be written and so nothing to edit. The
+catalog can now ship a reference copy of a config file — the complete file, with every
+setting at the value the game itself uses — and PortForge fills the gaps from it:
+settings the game has not written are added at the game's own values, the sections
+they belong in are added by copying them from the reference rather than by guessing,
+and anything already in the file is left exactly as the game wrote it. A config file
+the game has not created at all is shown from the reference and written the first time
+you save or ask for the files to be completed, so a game that has never run can still
+be set up before its first launch. Nothing is written for a release that does not have
+it, and where a reference copy and the catalog's description of a setting disagree,
+neither is used. A game whose config changes shape between releases can ship one
+reference per shape, and the installed release decides which is used.
+
+### Changed
+
+**The Config tab only shows settings you can actually change.** A setting the
+installed release stores differently, or one whose section the game has not written
+and PortForge cannot add, used to appear greyed out with a line explaining itself.
+Neither line offered anyone a choice — each stated something about the catalog that
+nobody could act on from a settings page — so those settings are now left out
+altogether, along with any section that held nothing else. A file with nothing
+editable in it says so once instead of drawing an empty panel. The settings are still
+noted in the log, because a catalog entry drifting away from the game it describes is
+worth knowing about. A game that has not been launched yet is unaffected: it still
+lists everything it will offer, since one launch is all that is missing.
+
+### Fixed
+
+**Saving a setting no longer reports itself as the game having changed it.** After a
+save, PortForge reads the files back to show what is actually in them, and it compared
+what it found against what it had read before — so the values it had just written
+looked like values something else had moved, and the Config tab announced that the game
+had been run and marked every setting that was saved. The comparison now only speaks for
+changes PortForge did not make, which is what it was for: a game that really does rewrite
+its config while the page is open is still reported, and still marked.
+
 ## v0.3.5-alpha — 2026-09-24
 
 ### Added

@@ -191,6 +191,8 @@ export namespace main {
 	    title: string;
 	    path: string;
 	    exists: boolean;
+	    fromReference?: boolean;
+	    empty?: boolean;
 	    sections: ConfigSection[];
 	
 	    static createFrom(source: any = {}) {
@@ -202,6 +204,8 @@ export namespace main {
 	        this.title = source["title"];
 	        this.path = source["path"];
 	        this.exists = source["exists"];
+	        this.fromReference = source["fromReference"];
+	        this.empty = source["empty"];
 	        this.sections = this.convertValues(source["sections"], ConfigSection);
 	    }
 	
